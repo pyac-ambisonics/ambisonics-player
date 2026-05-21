@@ -1,8 +1,5 @@
 from SphericalHarmonics import SphericalHarmonics
-import sounddevice as sd
-import soundfile as sf
 import pyfar as pf
-import numpy as np
 
 def main():
     ambi_file, ambi_order = load_ambi_file()
