@@ -4,6 +4,7 @@ import numpy as np
 import pyfar as pf
 import spharpy as sh
 import pooch
+import time
 
 class SphericalHarmonics:
 
@@ -75,8 +76,10 @@ class SphericalHarmonics:
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal):
+        start = time.time()
         # apply rotation to the sh_hrir
         sh_hrir = self.apply_rotation()
+        print(f"Applying rotation took {time.time() - start:.4f} seconds")
         # Check channel count by comparing the channel shape
         # we know the channel shape for ambi_signal is (channels,)
         ambi_ch, *_ = ambi_signal.cshape
@@ -85,6 +88,7 @@ class SphericalHarmonics:
         if ambi_ch != sh_hrir_ch:
             raise ValueError("Channel counts must match (16 for 3rd order).")
 
+        start = time.time()
         # sh_hrir should have the shape (2, ambi_order)
         # Convolve each channel separately for left and right
         # instantly store it as time data
@@ -98,7 +102,9 @@ class SphericalHarmonics:
             pf.Signal(sh_hrir.time[1, :, :], self.sampling_rate, domain='time'), # need to get the right channel here
             mode='full'
         ).time
-        
+        print(f"Convolving signals took {time.time() - start:.4f} seconds")
+
+        start = time.time()
         # Sum over channels -> single‑channel binaural signals
         left_signal = np.sum(left_conv, axis=0)
         right_signal = np.sum(right_conv, axis=0)
@@ -116,5 +122,6 @@ class SphericalHarmonics:
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
         stereo = pf.Signal(stereo_time, sampling_rate=self.sampling_rate, domain='time')
+        print(f"Summing signals, Gainstaging and creating stereo took {time.time() - start:.4f} seconds")
 
         return stereo
