@@ -7,6 +7,36 @@ import pooch
 import time
 
 class SphericalHarmonics:
+    """
+    Convert HRTFs into spherical-harmonic domain and apply rotations.
+
+    This class uses an HRTF dataset (SOFA), converts HRIRs to
+    spherical-harmonic coefficients for a given Ambisonic order, and provides
+    rotation + interpolation utilities and a fast HRTF application method.
+
+    Parameters
+    ----------
+    hrtf : Tuple or None.
+        Tuple containing (pyfar.Signal, array_like) containing the signal and sources of
+        the HRTF dataset, or None. If None, the FABIAN dataset is downloaded.
+    sampling_rate : int
+        Target sampling rate in Hz for HRIR resampling (default 48000).
+    ambi_order : int
+        Ambisonic order to use for spherical-harmonic decomposition.
+
+    Attributes
+    ----------
+    hrirs : pyfar.Signal
+        Loaded HRIRs (time-domain).
+    sources : array_like
+        Source coordinates corresponding to `hrirs`.
+    spherical_harmonics : spharpy.SphericalHarmonics
+        Computed spherical-harmonic basis and inverse.
+    hrirs_nm : spharpy.SphericalHarmonicSignal
+        HRIRs expressed in spherical-harmonic domain.
+    rotation : spharpy.transforms.SphericalHarmonicRotation
+        Current rotation transform (can be updated with `set_rotation`).
+    """
 
     # Constructor
     def __init__(self, hrtf=None, sampling_rate=48e3, ambi_order=1):
@@ -16,8 +46,11 @@ class SphericalHarmonics:
         # set sample rate. we should make sure this is the same as for the HRTFs!!!
         self.sampling_rate = sampling_rate
 
-        # load FABIAN from the web
-        self.hrirs, sources = self.load_hrtf_from_web()
+        if hrtf == None:
+            # load FABIAN from the web. replace this later!
+            self.hrirs, sources = self.load_hrtf_from_web()
+        else:
+            self.hrirs, sources = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
         if self.hrirs.sampling_rate != sampling_rate:
@@ -48,6 +81,17 @@ class SphericalHarmonics:
     
     # loads HRTFs from the internet
     def load_hrtf_from_web(self):
+        """
+        Download and load the FABIAN HRTF SOFA file.
+
+        Returns
+        -------
+        hrirs : pyfar.Signal
+            Loaded HRIR signals.
+        sources : ndarray
+            Source coordinate array associated with `hrirs`.
+        """
+
         # Leave this as it is: This is the URL from which the data will be downloaded
         # and a hash for checking if the download worked.
         url = 'https://github.com/pyfar/files/raw/refs/heads/main/education/VAR_TUB/FABIAN_HRIR_measured_HATO_0.sofa?download='
@@ -63,19 +107,57 @@ class SphericalHarmonics:
     
     # set the current rotation angle
     def set_rotation(self, angles):
+        """
+        Set the current spherical-harmonic rotation from Euler angles.
+
+        Parameters
+        ----------
+        angles : sequence of float
+            Euler angles in degrees as (alpha, beta, gamma).
+        """
+
         self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
         # recalculate the rotation matrix once
         #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
 
     # apply a rotation and return them as signal
     def apply_rotation(self):
+        """
+        Apply the current spherical-harmonic rotation to `hrirs_nm` and
+        return the rotated Signal.
+
+        Returns
+        -------
+        hrirs_rotated : pyfar.Signal
+            Time-domain HRIRs after rotation.
+        """
+
         # creates rotated HRIRs matrix
         #hrirs_nm_rotated = self.rotation_matrix @ self.hrirs_nm
         hrirs_nm_rotated = self.rotation.apply(self.hrirs_nm)
         return hrirs_nm_rotated
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf(self, ambi_signal):
+    def apply_hrtf(self, ambi_signal, pre_gain=1.):
+        """
+        Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
+
+        Parameters
+        ----------
+        ambi_signal : pyfar.Signal
+            Ambisonic input signal (should have cshape (n_channels,)).
+        pre_gain : float, optional
+            A float between 0. and 1., applied after internal gain-staging, Default is 1.
+
+        Returns
+        -------
+        stereo : pyfar.Signal
+            Stereo binaural signal (2 x n_samples) after convolution and gain staging.
+        """
+
+        if pre_gain > 1. or pre_gain < 0:
+            raise AttributeError("The pre_gain must be in range [0., 1.].")
+
         start = time.time()
         # apply rotation to the sh_hrir
         sh_hrir = self.apply_rotation()
@@ -115,8 +197,8 @@ class SphericalHarmonics:
         # Avoid division by zero
         if peak > 0:
             gain = 0.99 / peak   # 0.99 leaves a tiny headroom
-            left_signal *= gain
-            right_signal *= gain
+            left_signal *= gain * pre_gain
+            right_signal *= gain * pre_gain
 
 
         # create stereo signal by stacking the time data horizontally
