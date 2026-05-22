@@ -37,6 +37,9 @@ def load_ambi_file():
     """
     # load audio data
     ambi_signal = pf.io.read_audio("Ambisonics_Noise_3rd_order_noise_dir.wav")
+    if ambi_signal is None:
+        raise ImportError("Couldn't load ambisonics file.")
+    # infer ambisonics order
     channels, *_ = ambi_signal.cshape
     order = np.sqrt(channels) - 1
     if order != int(order):
