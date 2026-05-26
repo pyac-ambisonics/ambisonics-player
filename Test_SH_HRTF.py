@@ -1,4 +1,5 @@
 from SphericalHarmonics import SphericalHarmonics
+from HRTF import HRTF
 import pyfar as pf
 import numpy as np
 import time
@@ -9,9 +10,14 @@ def main():
     ambi_file, ambi_order = load_ambi_file()
     print(f"Loading ambi file took {time.time() - start:.4f} seconds\n")
 
+    print("Load HRTFs")
+    start = time.time()
+    hrtf = HRTF(None)
+    print(f"Loading HRTF took {time.time() - start:.4f} seconds\n")
+
     print("Creating Spherical Harmonics")
     start = time.time()
-    harmonics = SphericalHarmonics(sampling_rate=ambi_file.sampling_rate, ambi_order=ambi_order)
+    harmonics = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi_file.sampling_rate, ambi_order=ambi_order)
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
     print("Apply HRTF")

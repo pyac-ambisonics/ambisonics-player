@@ -3,8 +3,8 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-import pooch
 import time
+from HRTF import HRTF
 
 class SphericalHarmonics:
     """
@@ -48,16 +48,16 @@ class SphericalHarmonics:
 
         if hrtf == None:
             # load FABIAN from the web. replace this later!
-            self.hrirs, sources = self.load_hrtf_from_web()
+            self.hrtf = HRTF.load_HRTF(hrtf)
         else:
-            self.hrirs, sources = hrtf
+            self.hrtf = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
-        if self.hrirs.sampling_rate != sampling_rate:
-            self.hrirs = pf.dsp.resample(self.hrirs, sampling_rate=sampling_rate, match_amplitude='freq')
+        if self.hrtf.hrirs.sampling_rate != sampling_rate:
+            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, sampling_rate=sampling_rate, match_amplitude='freq')
 
         # store the sources in a Sampling Sphere
-        self.sources = sh.SamplingSphere.from_coordinates(sources)
+        self.sources = sh.SamplingSphere.from_coordinates(hrtf.sources)
 
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = ambi_order
@@ -69,7 +69,7 @@ class SphericalHarmonics:
 
         # create h_nm matrix 
         print("doing matrix mult to get hrirs_nm")
-        hrirs_nm = (self.spherical_harmonics.basis_inv @ self.hrirs).T
+        hrirs_nm = (self.spherical_harmonics.basis_inv @ self.hrtf.hrirs).T
         print("convert to spherical harmonic signal")
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, hrirs_nm.time, hrirs_nm.sampling_rate)
 
@@ -78,32 +78,6 @@ class SphericalHarmonics:
         self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
         # calculate the rotation matrix once
         #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
-    
-    # loads HRTFs from the internet
-    def load_hrtf_from_web(self):
-        """
-        Download and load the FABIAN HRTF SOFA file.
-
-        Returns
-        -------
-        hrirs : pyfar.Signal
-            Loaded HRIR signals.
-        sources : ndarray
-            Source coordinate array associated with `hrirs`.
-        """
-
-        # Leave this as it is: This is the URL from which the data will be downloaded
-        # and a hash for checking if the download worked.
-        url = 'https://github.com/pyfar/files/raw/refs/heads/main/education/VAR_TUB/FABIAN_HRIR_measured_HATO_0.sofa?download='
-        hash = '83ebbcd9a09d17679b95d201c9775438c0bb1199d565c3fc7a25448a905cdc3c'
-
-        file = pooch.retrieve(
-            url, hash, fname='FABIAN_HRIR_measured_HATO_0.sofa', path=None)
-
-        # load HRIRs and source positions
-        hrirs, sources, _ = pf.io.read_sofa(file)
-        print("Loaded HRTF from web")
-        return hrirs, sources
     
     # set the current rotation angle
     def set_rotation(self, angles):
