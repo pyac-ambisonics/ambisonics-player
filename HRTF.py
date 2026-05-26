@@ -16,8 +16,10 @@ class HRTF:
 
     def load_HRTF(self, path=None):
         try:
-            # load HRIRS from file
-            pass
+            # load HRIRs and source positions
+            hrirs, sources, _ = pf.io.read_sofa(path)
+            print("Loaded HRTF from file")
+            return hrirs, sources
         except Exception as e:
             print(f"Couldn't load the HRTF from file. Attempting to load from web instead. Exception: {e}")
         # try to load HRTF from web

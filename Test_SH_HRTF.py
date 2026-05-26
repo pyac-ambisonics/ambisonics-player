@@ -12,7 +12,7 @@ def main():
 
     print("Load HRTFs")
     start = time.time()
-    hrtf = HRTF(None)
+    hrtf = HRTF("FABIAN_HRIR_measured_HATO_0.sofa")
     print(f"Loading HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Creating Spherical Harmonics")
