@@ -3,25 +3,67 @@ import pyfar as pf
 import pooch
 
 class HRTF:
+    """
+    Helper for loading Head-Related Transfer Function (HRTF) data.
+
+    This class attempts to load HRIR/HRTF data from a local SOFA file given
+    by `path`. If loading from the local file fails, it will attempt to
+    download a default HRTF from the web.
+
+    Attributes
+    ----------
+    path : pathlib.Path or None
+        Path to the SOFA file used to load the HRTF. `None` if the provided
+        path could not be parsed.
+    hrirs : pyfar.Signal
+        Loaded HRIR signals
+    sources : ndarray
+        Source coordinate array associated with `hrirs`.
+    """
+
     def __init__(self, path):
+        """
+        Initialize an `HRTF` instance and load HRTF data.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path
+            Path or path-like object pointing to a SOFA file to load.
+
+        Notes
+        -----
+        The constructor will attempt to load the HRTF from the provided
+        `path`. On failure it will try to download a default HRTF from the
+        internet using `load_hrtf_from_web()`.
+        """
         # set the path for this HRTF
         try:
             self.path = Path(path)
         except Exception as e:
-            print(f"Couldn't load from path: {path}. {e}")
+            print(f"Couldn't parse path: {path}. {e}")
             self.path = None
 
         # load HRTF from files
-        self.hrirs, self.sources = self.load_HRTF(self.path)
+        self.hrirs, self.sources = self.load_HRTF()
 
-    def load_HRTF(self, path=None):
+    def load_HRTF(self):
+        """
+        Load HRTF data from a SOFA file or fall back to a web download.
+
+        Returns
+        -------
+        tuple
+            A tuple ``(hrirs, sources)`` where `hrirs` is a :class:`pyfar.Signal`
+            containing the HRIRs and `sources` is an ndarray with source
+            coordinates. If loading fails, both values may be `None`.
+        """
         try:
             # load HRIRs and source positions
-            hrirs, sources, _ = pf.io.read_sofa(path)
+            hrirs, sources, _ = pf.io.read_sofa(self.path)
             print("Loaded HRTF from file")
             return hrirs, sources
         except Exception as e:
-            print(f"Couldn't load the HRTF from file. Attempting to load from web instead. Exception: {e}")
+            print(f"Couldn't load the HRTF from file. Exception: {e}\nAttempting to load from web instead. ")
         # try to load HRTF from web
         try:
             return self.load_hrtf_from_web()
