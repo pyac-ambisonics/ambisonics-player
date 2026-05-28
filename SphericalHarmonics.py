@@ -112,7 +112,7 @@ class SphericalHarmonics:
         return hrirs_nm_rotated
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf(self, ambi_signal, pre_gain=1.):
+    def apply_hrtf(self, ambi_signal, gain=1.):
         """
         Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
 
@@ -120,7 +120,7 @@ class SphericalHarmonics:
         ----------
         ambi_signal : pyfar.Signal
             Ambisonic input signal (should have cshape (n_channels,)).
-        pre_gain : float, optional
+        gain : float, optional
             A float between 0. and 1., applied after internal gain-staging, Default is 1.
 
         Returns
@@ -129,8 +129,8 @@ class SphericalHarmonics:
             Stereo binaural signal (2 x n_samples) after convolution and gain staging.
         """
 
-        if pre_gain > 1. or pre_gain < 0:
-            raise AttributeError("The pre_gain must be in range [0., 1.].")
+        if gain > 1. or gain < 0:
+            raise AttributeError("The gain must be in range [0., 1.].")
 
         start = time.time()
         # apply rotation to the sh_hrir
@@ -170,9 +170,9 @@ class SphericalHarmonics:
         peak = max(np.abs(left_signal).max(), np.abs(right_signal).max())
         # Avoid division by zero
         if peak > 0:
-            gain = 0.99 / peak   # 0.99 leaves a tiny headroom
-            left_signal *= gain * pre_gain
-            right_signal *= gain * pre_gain
+            Pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
+            left_signal *= pre_gain * gain
+            right_signal *= pre_gain * gain
 
 
         # create stereo signal by stacking the time data horizontally
