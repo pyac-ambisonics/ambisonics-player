@@ -170,7 +170,7 @@ class SphericalHarmonics:
         peak = max(np.abs(left_signal).max(), np.abs(right_signal).max())
         # Avoid division by zero
         if peak > 0:
-            Pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
+            pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
             left_signal *= pre_gain * gain
             right_signal *= pre_gain * gain
 

@@ -21,8 +21,9 @@ def main():
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
     print("Apply HRTF")
+
     start = time.time()
-    stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, pre_gain=0.5)
+    stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
     print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Write binaural audio file")
