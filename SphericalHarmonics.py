@@ -48,7 +48,7 @@ class SphericalHarmonics:
 
         if hrtf == None:
             # load FABIAN from the web. replace this later!
-            self.hrtf = HRTF.load_HRTF(hrtf)
+            self.hrtf = HRTF(None)
         else:
             self.hrtf = hrtf
 
