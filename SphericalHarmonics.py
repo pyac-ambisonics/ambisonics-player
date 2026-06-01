@@ -47,7 +47,7 @@ class SphericalHarmonics:
         self.sampling_rate = sampling_rate
 
         if hrtf == None:
-            # load FABIAN from the web. replace this later!
+            # load FABIAN from the web if no HRTF was given
             self.hrtf = HRTF(None)
         else:
             self.hrtf = hrtf
@@ -168,13 +168,11 @@ class SphericalHarmonics:
         right_signal = np.sum(right_conv, axis=0)
 
         # do gain staging
-        # Find the maximum absolute value across both channels
-        peak = max(np.abs(left_signal).max(), np.abs(right_signal).max())
-        # Avoid division by zero
-        if peak > 0:
-            pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
-            left_signal *= pre_gain * gain
-            right_signal *= pre_gain * gain
+        pre_gain = self.find_gain()
+        left_signal *= pre_gain * gain
+        right_signal *= pre_gain * gain
+        # possibly make a clipping warning
+        self.test_clipping([left_signal, right_signal])
 
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
@@ -182,3 +180,30 @@ class SphericalHarmonics:
         print(f"Summing signals, Gainstaging and creating stereo took {time.time() - start:.4f} seconds")
 
         return stereo
+    
+    # find a good gain to apply to the stereo signal, based on the ambisonics order
+    def find_gain(self):
+        # thought process: 2 uncorrelated signals sum to +3dB
+        # 2 identical signals sum to +6dB
+        # so probably ours would sum to around +4.5dB? testing showed that 4 is good so far
+        # for each doubling of summed channels, this number is also doubled
+        estimate = 4
+
+        # by taking the square-root of the ambisonics order
+        # we get the doubling-factor to apply to our estimate
+        estimate *= np.sqrt(self.order_to_channel_n())
+        # B = 1 / 10^(estimate/20)
+        return 1 / np.pow(10, estimate * 0.05)
+    
+    def test_clipping(self, channels):
+        for channel in channels:
+            # test for clipping
+            if np.max(channel) >= 1:
+                print("\n####################\n" \
+                "WARNING! WARNING" \
+                "clipping detected!\n" \
+                "####################")
+    
+    def order_to_channel_n(self):
+        return (self.ambi_order + 1)**2
+
