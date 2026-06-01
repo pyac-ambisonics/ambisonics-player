@@ -78,6 +78,9 @@ class SphericalHarmonics:
         self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
         # calculate the rotation matrix once
         #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
+
+        # prepare pre_gain for gianstaging
+        self.pre_gain = self.find_gain()
     
     # set the current rotation angle
     def set_rotation(self, angles):
@@ -168,9 +171,8 @@ class SphericalHarmonics:
         right_signal = np.sum(right_conv, axis=0)
 
         # do gain staging
-        pre_gain = self.find_gain()
-        left_signal *= pre_gain * gain
-        right_signal *= pre_gain * gain
+        left_signal *= self.pre_gain * gain
+        right_signal *= self.pre_gain * gain
         # possibly make a clipping warning
         self.test_clipping([left_signal, right_signal])
 
