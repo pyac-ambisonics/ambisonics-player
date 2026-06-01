@@ -1,1 +1,2 @@
 - Drop down list for headphone model selection. list of models will eb provided soon (kylan)
+- transport bar in GUI to pick start offset on a line
