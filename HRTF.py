@@ -1,6 +1,7 @@
 from pathlib import Path
 import pyfar as pf
 import pooch
+import numpy as np
 
 class HRTF:
     """
@@ -65,10 +66,7 @@ class HRTF:
         except Exception as e:
             print(f"Couldn't load the HRTF from file. Exception: {e}\nAttempting to load from web instead. ")
         # try to load HRTF from web
-        try:
-            return self.load_hrtf_from_web()
-        except Exception as e:
-            print(f"Couldn't load the HRTF from the web. No HRTFs are loaded. Exception: {e}") 
+        return self.load_hrtf_from_web()
 
     # loads HRTFs from the internet
     def load_hrtf_from_web(self):
