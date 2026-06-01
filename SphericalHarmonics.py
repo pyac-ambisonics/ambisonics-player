@@ -48,7 +48,7 @@ class SphericalHarmonics:
 
         if hrtf == None:
             # load FABIAN from the web. replace this later!
-            self.hrtf = HRTF.load_HRTF(hrtf)
+            self.hrtf = HRTF(None)
         else:
             self.hrtf = hrtf
 
@@ -151,12 +151,14 @@ class SphericalHarmonics:
         left_conv = pf.dsp.convolve(
             ambi_signal,
             pf.Signal(sh_hrir.time[0, :, :], self.sampling_rate, domain='time'), # need to get the left channel here
-            mode='full'
+            mode='full',
+            method='overlap_add'
         ).time
         right_conv = pf.dsp.convolve(
             ambi_signal,
             pf.Signal(sh_hrir.time[1, :, :], self.sampling_rate, domain='time'), # need to get the right channel here
-            mode='full'
+            mode='full',
+            method='overlap_add'
         ).time
         print(f"Convolving signals took {time.time() - start:.4f} seconds")
 
@@ -173,7 +175,6 @@ class SphericalHarmonics:
             pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
             left_signal *= pre_gain * gain
             right_signal *= pre_gain * gain
-
 
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
