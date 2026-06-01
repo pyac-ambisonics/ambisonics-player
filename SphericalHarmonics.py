@@ -185,6 +185,21 @@ class SphericalHarmonics:
     
     # find a good gain to apply to the stereo signal, based on the ambisonics order
     def find_gain(self):
+        """
+        Compute a pre-gain factor for ambisonic-to-binaural rendering.
+
+        The method uses a simple empirical estimate (base ~4 dB) and scales it
+        with the square root of the number of ambisonic channels to account for
+        incoherent summation. The returned value is a linear gain (not dB)
+        that can be multiplied with the rendered stereo signals before clipping
+        checks and any user gain is applied.
+
+        Returns
+        -------
+        float
+            Linear gain factor to apply (positive scalar, typically < 1).
+        """
+
         # thought process: 2 uncorrelated signals sum to +3dB
         # 2 identical signals sum to +6dB
         # so probably ours would sum to around +4.5dB? testing showed that 4 is good so far
@@ -197,7 +212,21 @@ class SphericalHarmonics:
         # B = 1 / 10^(estimate/20)
         return 1 / np.pow(10, estimate * 0.05)
     
+    # test if  the channels are clipping
     def test_clipping(self, channels):
+        """
+        Check provided channels for clipping and print a warning if detected.
+
+        Parameters
+        ----------
+        channels : sequence of array_like
+            Iterable of 1-D arrays containing time-domain samples for each
+            channel (e.g., left and right). The function checks whether any
+            sample reaches or exceeds the amplitude threshold of 1.0 and
+            prints a warning message if clipping is found. This function has
+            no return value and only produces a console side-effect.
+        """
+
         for channel in channels:
             # test for clipping
             if np.max(channel) >= 1:
@@ -206,6 +235,18 @@ class SphericalHarmonics:
                 "clipping detected!\n" \
                 "####################")
     
+    # calculates the nummer of channels corresponding to the ambisonics order
     def order_to_channel_n(self):
+        """
+        Return the number of spherical-harmonic channels for the current order.
+
+        For a given ambisonic order N the number of channels is (N + 1)^2.
+
+        Returns
+        -------
+        int
+            Number of spherical-harmonic/ambisonic channels.
+        """
+
         return (self.ambi_order + 1)**2
 
