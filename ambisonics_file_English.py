@@ -56,7 +56,7 @@ class AmbisonicsFile:
         # Determine Ambisonics order
         # ==========================================================
 
-         if order is not None:
+        if order is not None:
             self.order = order
             print(f"Using user-specified order: {self.order}")
         else:
@@ -89,7 +89,7 @@ class AmbisonicsFile:
     # Channel setup
     # ==============================================================
 
-   def _setup_channel_layout(self, trim_extra_channels: bool):
+    def _setup_channel_layout(self, trim_extra_channels: bool):
         expected_channels = (self.order + 1) ** 2
 
         if self.num_channels == expected_channels:
