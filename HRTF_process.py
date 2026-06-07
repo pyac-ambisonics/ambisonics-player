@@ -35,10 +35,12 @@ class HRTF_process:
 
     # solves the Least Squares Problem. This means just applying the spherical Harmonics to the HRTF
     def __ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics):
+        print("Using LS method: Simple matrix multiplication.")
         return (sh.basis_inv @ hrirs).T
 
     # apply the magnitude least squares algorithm for better results for low order ambisonics
     def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=3000, ramp=0):
+        print("Using MagLS method.")
         # handle some exceptions
         if ramp < 0:
             raise Exception("Ramp value must be >= 0")
@@ -56,7 +58,7 @@ class HRTF_process:
         alpha = np.zeros_like(hrirs_freq, dtype=float)
         alpha[freq_idx:] = 1
 
-        # make a ramp up if needed
+        # make a ramp up if needed. Use Hanning for smoothness
         if ramp > 0:
             # find start and stop indices
             half = ramp / 2
