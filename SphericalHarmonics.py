@@ -5,6 +5,7 @@ import pyfar as pf
 import spharpy as sh
 import time
 from HRTF import HRTF
+from HRTF_process import HRTF_process
 
 class SphericalHarmonics:
     """
@@ -67,9 +68,12 @@ class SphericalHarmonics:
         # create the spherical harmonics object from definition and sampling sphere
         self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, self.sources, inverse_method="pseudo_inverse")
 
+        # create hrtf processing unit
+        process = HRTF_process()
+
         # create h_nm matrix 
         print("doing matrix mult to get hrirs_nm")
-        hrirs_nm = (self.spherical_harmonics.basis_inv @ self.hrtf.hrirs).T
+        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, self.spherical_harmonics)
         print("convert to spherical harmonic signal")
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, hrirs_nm.time, hrirs_nm.sampling_rate)
 

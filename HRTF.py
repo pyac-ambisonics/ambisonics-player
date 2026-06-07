@@ -108,7 +108,7 @@ class HRTF:
         path = self.hp_dir / name
         # load HRIRs and source positions
         try: 
-            # this somehow always fails ebcause of some bullshit with sofa conventions.
+            # this somehow always fails because of some bullshit with sofa conventions.
             # thats why we load wavs instead
             hp_filter, *_ = pf.io.read_sofa(path / "HpIRs.sofa")
             print(f"Loaded Headphone Filter {name} from sofa")

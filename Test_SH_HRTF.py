@@ -3,6 +3,7 @@ from HRTF import HRTF
 import pyfar as pf
 import numpy as np
 import time
+import shroom as ps
 
 def main():
     print("Loading ambi file")
