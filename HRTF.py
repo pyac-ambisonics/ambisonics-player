@@ -22,7 +22,7 @@ class HRTF:
         Source coordinate array associated with `hrirs`.
     """
 
-    def __init__(self, path):
+    def __init__(self, path=None):
         """
         Initialize an `HRTF` instance and load HRTF data. Initialize a list of available headphone
         filters. 

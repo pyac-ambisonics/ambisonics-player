@@ -9,3 +9,6 @@ FABIAN_HRIR_measured_HATO_0.sofa
 __pycache__/HRTF.cpython-314.pyc
 benchmarks.py
 testing.ipynb
+written_binaural_ls.wav
+written_binaural_magls.wav
+.vscode/launch.json

@@ -49,33 +49,48 @@ class SphericalHarmonics:
 
         if hrtf == None:
             # load FABIAN from the web if no HRTF was given
-            self.hrtf = HRTF(None)
+            self.hrtf = HRTF()
         else:
             self.hrtf = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
         if self.hrtf.hrirs.sampling_rate != sampling_rate:
-            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, sampling_rate=sampling_rate, match_amplitude='freq')
+            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, 
+                                              sampling_rate=sampling_rate, 
+                                              match_amplitude='freq'
+                                              )
 
         # store the sources in a Sampling Sphere
         self.sources = sh.SamplingSphere.from_coordinates(hrtf.sources)
 
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = ambi_order
-        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, normalization="SN3D", 
-                                                            basis_type='real', condon_shortley=False)
+        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, 
+                                                            normalization="SN3D", 
+                                                            basis_type='real', 
+                                                            condon_shortley=False
+                                                            )
 
         # create the spherical harmonics object from definition and sampling sphere
-        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, self.sources, inverse_method="pseudo_inverse")
+        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
+                                                                         self.sources, 
+                                                                         inverse_method="pseudo_inverse"
+                                                                         )
 
         # create hrtf processing unit
         process = HRTF_process()
 
         # create h_nm matrix 
         print("applying preprocessing to hrrtf to get hrirs_nm")
-        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, self.spherical_harmonics)
+        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, 
+                                               self.spherical_harmonics,
+                                               algorithm='MagLS'
+                                               )
         print("convert to spherical harmonic signal")
-        self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, hrirs_nm.time, hrirs_nm.sampling_rate)
+        self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
+                                                                   hrirs_nm.time, 
+                                                                   hrirs_nm.sampling_rate
+                                                                   )
 
         # prepare a rotation matrix, with all angles 0 currently
         angles = [0, 0, 0]
@@ -157,13 +172,19 @@ class SphericalHarmonics:
         # instantly store it as time data
         left_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[0, :, :], self.sampling_rate, domain='time'), # need to get the left channel here
+            pf.Signal(sh_hrir.time[0, :, :], 
+                      self.sampling_rate, 
+                      domain='time'
+                      ), # need to get the left channel here
             mode='full',
             method='overlap_add'
         ).time
         right_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[1, :, :], self.sampling_rate, domain='time'), # need to get the right channel here
+            pf.Signal(sh_hrir.time[1, :, :], 
+                      self.sampling_rate, 
+                      domain='time'
+                      ), # need to get the right channel here
             mode='full',
             method='overlap_add'
         ).time
@@ -182,7 +203,10 @@ class SphericalHarmonics:
 
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
-        stereo = pf.Signal(stereo_time, sampling_rate=self.sampling_rate, domain='time')
+        stereo = pf.Signal(stereo_time, 
+                           sampling_rate=self.sampling_rate, 
+                           domain='time'
+                           )
         print(f"Summing signals, Gainstaging and creating stereo took {time.time() - start:.4f} seconds")
 
         return stereo
