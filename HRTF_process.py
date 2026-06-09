@@ -41,7 +41,7 @@ class HRTF_process:
         return (sh.basis_inv @ hrirs).T
 
     # apply the magnitude least squares algorithm for better results for low order ambisonics
-    # ramp = 0 -> no ramp. ramp = 1 -> default ramp (cutoff * sqrt(2)). ramp > 1 -> specific ramp in freq
+    # ramp = 0 -> no ramp. ramp = 1 -> default ramp (cutoff * (1/sqrt(2))). ramp > 1 -> specific ramp in freq
     def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=3000, ramp=1):
         print("Using MagLS method.")
         # make our data frequency data
@@ -62,11 +62,10 @@ class HRTF_process:
             if ramp == 1:
                 ramp = cutoff * (1 / np.sqrt(2))
             # find start and stop indices. make sure they are not below 0 or above fs
-            half = ramp / 2
-            start = hrirs.find_nearest_frequency(cutoff - half)
+            start = hrirs.find_nearest_frequency(cutoff - ramp)
             # probably unnecessary, since find_nearest_freq should always return valid indices
             # start = max(start, 0) 
-            stop = hrirs.find_nearest_frequency(cutoff + half)
+            stop = hrirs.find_nearest_frequency(cutoff)
             # probably unnecessary, since find_nearest_freq should always return valid indices
             # stop = min(hrirs_freq.size, stop)
             # length
@@ -92,12 +91,6 @@ class HRTF_process:
                 # for each ear, all directional data, and the current frequency: find magls
                 # solve the magnitude only optimization
                 # above cutoff: do least squares, magnitude from original, phase from min-phase
-                x = sh_util.magls(A=sh_basis, b=hrirs_freq[:, ear, f], x_prev=nm_magls[ear, :, f-1])
-                print("magls dtype:", 
-                      x.dtype, "iscomplex:", 
-                      np.iscomplexobj(x), 
-                      "max_imag:", 
-                      np.max(np.abs(x.imag)))
                 nm_magls[ear, :, f] = (
                     # use shroom library for speed
                     # only returns real numbers????
