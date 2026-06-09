@@ -58,9 +58,9 @@ class HRTF_process:
         
         # make a ramp up if needed. Use Hanning for smoothness
         if ramp > 0:
-            # use default ramp of sqrt(2)
+            # use default ramp of f * (1/sqrt(2))
             if ramp == 1:
-                ramp = cutoff * np.sqrt(2)
+                ramp = cutoff * (1 / np.sqrt(2))
             # find start and stop indices. make sure they are not below 0 or above fs
             half = ramp / 2
             start = hrirs.find_nearest_frequency(cutoff - half)
@@ -72,7 +72,7 @@ class HRTF_process:
             # length
             length = max(stop - start, 0)
             # create a Hanning window, use the half that goes from 0 -> 1
-            win = np.hanning(2*length)[length:]
+            win = np.hanning(2*length)[:length]
             alpha[start:start+length] = win
         print("Created ramp successfully")
 
@@ -92,8 +92,15 @@ class HRTF_process:
                 # for each ear, all directional data, and the current frequency: find magls
                 # solve the magnitude only optimization
                 # above cutoff: do least squares, magnitude from original, phase from min-phase
+                x = sh_util.magls(A=sh_basis, b=hrirs_freq[:, ear, f], x_prev=nm_magls[ear, :, f-1])
+                print("magls dtype:", 
+                      x.dtype, "iscomplex:", 
+                      np.iscomplexobj(x), 
+                      "max_imag:", 
+                      np.max(np.abs(x.imag)))
                 nm_magls[ear, :, f] = (
                     # use shroom library for speed
+                    # only returns real numbers????
                     alpha[f] * sh_util.magls(A=sh_basis, 
                                              b=hrirs_freq[:, ear, f], 
                                              x_prev=nm_magls[ear, :, f-1]
