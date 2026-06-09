@@ -2,6 +2,7 @@ import numpy as np
 import pyfar as pf
 import spharpy
 from scipy.optimize import minimize
+import shroom.utils.math_utils as sh_util
 
 # a class making different HRTF preprocessing algorithms available
 
@@ -92,10 +93,16 @@ class HRTF_process:
                 # solve the magnitude only optimization
                 # above cutoff: do least squares, magnitude from original, phase from min-phase
                 nm_magls[ear, :, f] = (
-                    alpha[f] * self.__mag_ls_solver(Y=sh_basis, 
-                                                    target=hrirs_freq[:, ear, f], 
-                                                    x_prev=nm_magls[ear, :, f-1]
-                                                    )
+                    # use shroom library for speed
+                    alpha[f] * sh_util.magls(A=sh_basis, 
+                                             b=hrirs_freq[:, ear, f], 
+                                             x_prev=nm_magls[ear, :, f-1]
+                                             ) *
+                    # our own solution
+                    # alpha[f] * self.__mag_ls_solver(Y=sh_basis, 
+                    #                                 target=hrirs_freq[:, ear, f], 
+                    #                                 x_prev=nm_magls[ear, :, f-1]
+                    #                                 )
                     + (1 - alpha[f]) * hrirs_sh[ear, :, f]
                 )
         
@@ -131,41 +138,3 @@ class HRTF_process:
         # to do: implement phase alignment
 
         return x_min
-    
-    # AI generated MAG_LS solver. look at this some other time
-    def mag_ls_gs(Y, target, x0=None, n_iter=50, tol=1e-8):
-        """
-        Alternating-projection solver for min || |Y x| - |target| ||^2
-        Y: (m, n) complex matrix
-        target: (m,) complex vector (we use its magnitude)
-        x0: initial complex x (n,) or None
-        Returns complex x (n,)
-        """
-        m, n = Y.shape
-        if x0 is None:
-            x = np.linalg.lstsq(Y, target, rcond=None)[0]    # init with LS (uses phase of target)
-        else:
-            x = x0.copy().astype(complex)
-
-        mag = np.abs(target)
-        # build real-augmented matrix for complex least squares:
-        # [Re(Y) -Im(Y)] [Re(x)] = [Re(y)]
-        # [Im(Y)  Re(Y)] [Im(x)]   [Im(y)]
-        A_top = np.hstack([Y.real, -Y.imag])
-        A_bot = np.hstack([Y.imag,  Y.real])
-        A = np.vstack([A_top, A_bot])        # shape (2m, 2n)
-
-        for k in range(n_iter):
-            u = Y @ x                         # current complex measurements (m,)
-            phases = np.exp(1j * np.angle(u)) # keep phase
-            y_desired = mag * phases          # target with current phase
-
-            b = np.concatenate([y_desired.real, y_desired.imag])
-            # solve real least-squares for [Re(x); Im(x)]
-            rx, *_ = np.linalg.lstsq(A, b, rcond=None)
-            x_new = rx[:n] + 1j * rx[n:]
-
-            if np.linalg.norm(x_new - x) < tol:
-                return x_new
-            x = x_new
-        return x
