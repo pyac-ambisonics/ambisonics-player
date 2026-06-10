@@ -50,7 +50,7 @@ class HRTF_process:
         freq_axis = hrirs.frequencies
         freq_idx = hrirs.find_nearest_frequency(cutoff)
 
-        # create lambda value for each frequency: possibly with a ramp up? or just 0/1?
+        # create alpha value for each frequency: possibly with a ramp up? or just 0/1?
         # with just 0/1 we might have to smooth the phase later
         alpha = np.zeros_like(freq_axis, dtype=float)
         alpha[freq_idx:] = 1
@@ -61,14 +61,9 @@ class HRTF_process:
             # use default ramp of f * (1/sqrt(2))
             if ramp == 1:
                 ramp = cutoff * (1 / np.sqrt(2))
-            # find start and stop indices. make sure they are not below 0 or above fs
+            # find start and stop indices. find_nearest_freq should always return valid indices
             start = hrirs.find_nearest_frequency(cutoff - ramp)
-            # probably unnecessary, since find_nearest_freq should always return valid indices
-            # start = max(start, 0) 
             stop = hrirs.find_nearest_frequency(cutoff)
-            # probably unnecessary, since find_nearest_freq should always return valid indices
-            # stop = min(hrirs_freq.size, stop)
-            # length
             length = max(stop - start, 0)
             # create a Hanning window, use the half that goes from 0 -> 1
             win = np.hanning(2*length)[:length]

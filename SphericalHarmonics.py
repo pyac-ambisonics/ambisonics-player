@@ -27,7 +27,7 @@ class SphericalHarmonics:
 
     Attributes
     ----------
-    hrirs : pyfar.Signal
+    hrirs : HRTF
         Loaded HRIRs (time-domain).
     sources : array_like
         Source coordinates corresponding to `hrirs`.
@@ -40,7 +40,7 @@ class SphericalHarmonics:
     """
 
     # Constructor
-    def __init__(self, hrtf=None, sampling_rate=48e3, ambi_order=1):
+    def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1):
         # # set the hrtf. this should be a pyfar signal!
         # self.hrtf = hrtf
 
@@ -100,6 +100,9 @@ class SphericalHarmonics:
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self.find_gain()
+
+    def get_IR_length(self):
+        return self.hrirs_nm.n_samples
     
     # set the current rotation angle
     def set_rotation(self, angles):
@@ -134,7 +137,7 @@ class SphericalHarmonics:
         return hrirs_nm_rotated
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf(self, ambi_signal, gain=1.):
+    def apply_hrtf(self, ambi_signal: pf.Signal, gain=1., pad=False, pad_length=0):
         """
         Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
 
@@ -154,10 +157,9 @@ class SphericalHarmonics:
         if gain > 1. or gain < 0:
             raise AttributeError("The gain must be in range [0., 1.].")
 
-        start = time.time()
         # apply rotation to the sh_hrir
         sh_hrir = self.apply_rotation()
-        print(f"Applying rotation took {time.time() - start:.4f} seconds")
+
         # Check channel count by comparing the channel shape
         # we know the channel shape for ambi_signal is (channels,)
         ambi_ch, *_ = ambi_signal.cshape
@@ -166,13 +168,20 @@ class SphericalHarmonics:
         if ambi_ch != sh_hrir_ch:
             raise ValueError("Channel counts must match (16 for 3rd order).")
 
-        start = time.time()
+        # create our time signals
+        left = sh_hrir.time[0, :, :]
+        right = sh_hrir.time[1, :, :]
+
+        # pad if needed
+        if pad:
+            left = np.pad(left, ((0,0),(0,pad_length)))
+            right = np.pad(right, ((0,0),(0,pad_length)))
         # sh_hrir should have the shape (2, ambi_order)
         # Convolve each channel separately for left and right
         # instantly store it as time data
         left_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[0, :, :], 
+            pf.Signal(left, 
                       self.sampling_rate, 
                       domain='time'
                       ), # need to get the left channel here
@@ -181,16 +190,14 @@ class SphericalHarmonics:
         ).time
         right_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[1, :, :], 
+            pf.Signal(right, 
                       self.sampling_rate, 
                       domain='time'
                       ), # need to get the right channel here
             mode='full',
             method='overlap_add'
         ).time
-        print(f"Convolving signals took {time.time() - start:.4f} seconds")
 
-        start = time.time()
         # Sum over channels -> single‑channel binaural signals
         left_signal = np.sum(left_conv, axis=0)
         right_signal = np.sum(right_conv, axis=0)
@@ -203,13 +210,12 @@ class SphericalHarmonics:
 
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
-        stereo = pf.Signal(stereo_time, 
-                           sampling_rate=self.sampling_rate, 
-                           domain='time'
-                           )
-        print(f"Summing signals, Gainstaging and creating stereo took {time.time() - start:.4f} seconds")
+        # stereo = pf.Signal(stereo_time, 
+        #                    sampling_rate=self.sampling_rate, 
+        #                    domain='time'
+        #                    )
 
-        return stereo
+        return stereo_time
     
     # find a good gain to apply to the stereo signal, based on the ambisonics order
     def find_gain(self):

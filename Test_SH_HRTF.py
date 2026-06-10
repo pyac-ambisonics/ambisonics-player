@@ -1,5 +1,6 @@
 from SphericalHarmonics import SphericalHarmonics
 from HRTF import HRTF
+from ambisonics_file_English import AmbisonicsFile
 import pyfar as pf
 import numpy as np
 import time
@@ -8,7 +9,9 @@ import shroom as ps
 def main():
     print("Loading ambi file")
     start = time.time()
-    ambi_file, ambi_order = load_ambi_file()
+    # ambi_file, ambi_order = load_ambi_file()
+    ambi_file = AmbisonicsFile("Ambisonics_Noise_3rd_order_noise_dir.wav", chunk_size=256)
+    ambi_order = ambi_file.get_order()
     print(f"Loading ambi file took {time.time() - start:.4f} seconds\n")
 
     print("Load HRTFs")
@@ -18,19 +21,83 @@ def main():
 
     print("Creating Spherical Harmonics")
     start = time.time()
-    harmonics = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi_file.sampling_rate, ambi_order=ambi_order)
+    harmonics = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi_file.get_samplerate(), ambi_order=ambi_order)
+    print(f"{harmonics.ambi_order=}")
+    print(f"{harmonics.hrirs_nm.cshape=}")
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
     print("Apply HRTF")
-
     start = time.time()
-    stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
+    stereo = overlap_add(ambi_file, harmonics, gain=0.5)
+    #stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
     print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Write binaural audio file")
     start = time.time()
-    pf.io.write_audio(stereo, "written_binaural_ls.wav")
+    pf.io.write_audio(stereo, "written_binaural_oa.wav")
     print(f"Writing file took {time.time() - start:.2f} seconds\n")
+
+def overlap_add(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.):
+    # current impulse response length M
+    sh_length = sh.get_IR_length()
+    # block size L
+    block_size = ambi_file.get_chunk_size()
+    # compute N >= M + L - 1
+    N = next_power_of_two(sh_length + block_size - 1)
+    # amount we need to pad our HRTF to
+    required_pad = block_size - sh_length
+
+    # allocate buffers
+    overlap_buffer = np.zeros((2, sh_length - 1), dtype=np.float32)
+    output_length = ambi_file.total_frames + block_size
+    output_buffer = np.zeros((2, output_length), dtype=np.float32)
+    pos = 0
+
+    # core loop to process each chunk
+    while True:
+        chunk, end_of_file = ambi_file.get_next_chunk()
+
+        # break if our chunk is None
+        if chunk is None:
+            break
+
+        # transpose chunk to correct shape (currently n_samples, n_channels
+        chunk = chunk.T
+        # zero pad and make a signal
+        pad_width = N - len(chunk[0])
+        chunk_pad = np.pad(chunk, ((0,0),(0, pad_width)))
+        chunk_sig = pf.Signal(chunk_pad, ambi_file.get_samplerate())
+
+        # apply hrtf
+        stereo = sh.apply_hrtf(chunk_sig, gain, pad=True, pad_length=required_pad)
+        # add overlap to stereo output
+        stereo[:,:sh_length-1] += overlap_buffer
+        # add stereo to output buffer
+        output_buffer[:, pos:pos + block_size] = stereo[:,:block_size]
+        # save new overlap buffer
+        overlap_buffer = stereo[:, block_size:block_size + sh_length - 1]
+        #update position
+        pos += block_size
+        
+        # escape the loop if we reacehd the end of the file
+        if end_of_file:
+            # write the last overlap_buffer to our output
+            output_buffer[:, pos:pos + sh_length - 1] = overlap_buffer
+            break
+
+    # create final pyfar signal
+    stereo = pf.Signal(output_buffer, 
+                       sampling_rate=ambi_file.get_samplerate(), 
+                       domain='time'
+                       )
+
+    return stereo
+
+  
+
+def next_power_of_two(n: int) -> int:
+    # make use of bitshifts to quickly calculate the enxt power of two
+    return 1 << (n - 1).bit_length()
 
 def load_ambi_file():
     """
