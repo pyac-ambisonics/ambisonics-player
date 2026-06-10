@@ -10,12 +10,15 @@ Ambisonics file handling with pyfar.Signal format.
 Supports automatic empty channel detection and real-time chunked reading.
 """
 
+import logging
 import numpy as np
 import pyfar as pf
 import soundfile as sf
 
 from typing import Tuple, Optional, List
 from utils import ambix_channels_to_order
+
+logger = logging.getLogger(__name__)
 
 
 class AmbisonicsFile:
@@ -25,7 +28,6 @@ class AmbisonicsFile:
     Features:
     - TRUE chunked streaming
     - Low memory usage
-    - Empty channel detection
     - float32 processing
     - pyfar compatibility
     """
@@ -34,8 +36,8 @@ class AmbisonicsFile:
         self,
         filepath: str,
         chunk_size: int = 2048,
-        auto_detect_empty: bool = True,
-        analysis_duration: float = 1.0,
+        order: Optional[int] = None,
+        trim_extra_channels: bool = True, 
     ):
 
         self.filepath = filepath
@@ -57,7 +59,11 @@ class AmbisonicsFile:
         # Determine Ambisonics order
         # ==========================================================
 
-        self.order = ambix_channels_to_order(self.num_channels)
+        if order is not None:
+            self.order = order
+            logger.info("Using user-specified order: %d", self.order)
+        else:
+            self.order = ambix_channels_to_order(self.num_channels)
 
         # ==========================================================
         # Stream state
@@ -79,133 +85,39 @@ class AmbisonicsFile:
         # Analyze channels
         # ==========================================================
 
-        self._setup_channel_layout(
-            auto_detect_empty,
-            analysis_duration
-        )
-
+        self._setup_channel_layout(trim_extra_channels)
         self._print_load_info()
 
     # ==============================================================
     # Channel setup
     # ==============================================================
 
-    def _setup_channel_layout(
-        self,
-        auto_detect_empty: bool,
-        analysis_duration: float
-    ):
-
+    def _setup_channel_layout(self, trim_extra_channels: bool):
         expected_channels = (self.order + 1) ** 2
 
-        # Perfect match
         if self.num_channels == expected_channels:
-
             self._valid_channels = list(range(self.num_channels))
             self._empty_channels = []
-
             return
 
-        print(
-            f"Channel mismatch: "
-            f"{self.num_channels} vs expected {expected_channels}"
-        )
+        logger.info("Channel mismatch: %d vs expected %d", self.num_channels, expected_channels)
 
-        # Try auto-detection
-        if self.num_channels > expected_channels and auto_detect_empty:
-
-            valid, empty = self._analyze_channels(
-                analysis_duration
-            )
-
-            self._valid_channels = valid
-            self._empty_channels = empty
-
-            if len(valid) == expected_channels:
-
-                print(
-                    f"Auto-detected {len(valid)} valid channels"
-                )
-
-                print(
-                    f"Ignoring {len(empty)} empty channels"
-                )
-
+        if self.num_channels > expected_channels:
+            if trim_extra_channels:
+                self._valid_channels = list(range(expected_channels))
+                self._empty_channels = list(range(expected_channels, self.num_channels))
                 self._has_extra_channels = True
-
+                logger.info("Keeping first %d channels, discarding %d trailing channels",
+                            expected_channels, len(self._empty_channels))
             else:
-
-               print(
-                    f"Detected {len(valid)} active channels "
-                    f"but expected {expected_channels}"
-                )
-
+                self._valid_channels = list(range(self.num_channels))
+                self._empty_channels = []
+                logger.warning("Keeping all channels, decoding may fail")
         else:
-
-            print(
-                f"File has {self.num_channels} channels "
-                f"but expected {expected_channels}"
-            )
-
-    # ==============================================================
-    # Analyze channels
-    # ==============================================================
-
-    def _analyze_channels(
-        self,
-        analysis_duration: float = 1.0
-    ) -> Tuple[List[int], List[int]]:
-
-        analysis_samples = min(
-            int(analysis_duration * self.samplerate),
-            self.total_frames
-        )
-
-        # IMPORTANT:
-        # only read a small segment
-        self.file.seek(0)
-
-        segment = self.file.read(
-            frames=analysis_samples,
-            dtype='float32',
-            always_2d=True
-        )
-
-        energies = []
-
-        for ch in range(self.num_channels):
-
-            rms = np.sqrt(
-                np.mean(segment[:, ch] ** 2)
-            )
-
-            energies.append(rms)
-
-        threshold = 1e-8
-
-        valid_channels = [
-            i for i, e in enumerate(energies)
-            if e > threshold
-        ]
-
-        empty_channels = [
-            i for i, e in enumerate(energies)
-            if e <= threshold
-        ]
-
-        if empty_channels:
-
-            print(
-                f"Channel analysis: "
-                f"{len(valid_channels)} active, "
-                f"{len(empty_channels)} silent"
-            )
-
-            print(
-                f"Empty channels: {empty_channels}"
-            )
-
-        return valid_channels, empty_channels
+            raise ValueError(
+            f"File has only {self.num_channels} channels, but Ambisonics order {self.order} "
+            f"requires at least {expected_channels} channels. The file is incomplete or not "
+            f"a valid Ambisonics file of the specified order.")
 
     # ==============================================================
     # Frame reading
@@ -248,10 +160,10 @@ class AmbisonicsFile:
                 and not self._channel_warning_printed
             ):
 
-                print(
-                    f"Filtering channels: "
-                    f"{self.num_channels} -> "
-                    f"{audio_data.shape[1]}"
+                logger.debug(
+                    "Filtering channels: %d -> %d",
+                    self.num_channels,
+                    audio_data.shape[1]
                 )
 
                 self._channel_warning_printed = True
@@ -326,8 +238,15 @@ class AmbisonicsFile:
         self.seek_to_position(position)
 
     def reset_position(self):
-
         self._current_position = 0
+
+    def get_current_position(self) -> int:
+        """Return the current stream position in samples."""
+        return self._current_position
+
+    def get_current_time(self) -> float:
+        """Return the current stream position in seconds."""
+        return self._current_position / self.samplerate
 
     # ==============================================================
     # Info
@@ -344,7 +263,7 @@ class AmbisonicsFile:
 
     def get_num_channels(self) -> int:
 
-        if self._valid_channels:
+        if self._valid_channels is not None:
             return len(self._valid_channels)
 
         return self.num_channels
@@ -362,9 +281,9 @@ class AmbisonicsFile:
             min(8192, chunk_size)
         )
 
-        print(
-            f"Chunk size changed to "
-            f"{self.chunk_size}"
+        logger.info(
+            "Chunk size changed to %d",
+            self.chunk_size
         )
 
     # ==============================================================
@@ -375,7 +294,7 @@ class AmbisonicsFile:
 
         effective = (
             len(self._valid_channels)
-            if self._valid_channels
+            if self._valid_channels is not None
             else self.num_channels
         )
 
@@ -403,42 +322,14 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _print_load_info(self):
-
         effective_channels = self.get_num_channels()
-
-        print("\n" + "=" * 50)
-
-        print(f"Loaded: {self.filepath}")
-
-        print(f"Order: {self.order}")
-
-        print(
-            f"Channels: "
-            f"{self.num_channels} -> "
-            f"{effective_channels}"
+        logger.info(
+            "Loaded: %s | Order: %d | Channels: %d -> %d | "
+            "Duration: %.2fs | SR: %d | Frames: %d | Chunk: %d",
+            self.filepath, self.order, self.num_channels,
+            effective_channels, self.duration, self.samplerate,
+            self.total_frames, self.chunk_size
         )
-
-        print(
-            f"Duration: "
-            f"{self.duration:.2f} sec"
-        )
-
-        print(
-            f"Sample rate: "
-            f"{self.samplerate}"
-        )
-
-        print(
-            f"Frames: "
-            f"{self.total_frames}"
-        )
-
-        print(
-            f"Chunk size: "
-            f"{self.chunk_size}"
-        )
-
-        print("=" * 50 + "\n")
 
     # ==============================================================
     # Cleanup
@@ -454,3 +345,14 @@ class AmbisonicsFile:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    def __repr__(self):
+        return (
+            f"AmbisonicsFile(order={self.order}, "
+            f"channels={self.get_num_channels()}, "
+            f"duration={self.duration:.2f}s, "
+            f"sr={self.samplerate})"
+        )
+
+    def __len__(self):
+        return self.total_frames
