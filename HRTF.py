@@ -22,9 +22,10 @@ class HRTF:
         Source coordinate array associated with `hrirs`.
     """
 
-    def __init__(self, path):
+    def __init__(self, path=None):
         """
-        Initialize an `HRTF` instance and load HRTF data.
+        Initialize an `HRTF` instance and load HRTF data. Initialize a list of available headphone
+        filters. 
 
         Parameters
         ----------
@@ -46,6 +47,13 @@ class HRTF:
 
         # load HRTF from files
         self.hrirs, self.sources = self.load_HRTF()
+        self.hrirs_linear = self.hrirs.copy()
+
+        # make a list of all subdirectories of our Headphone filters
+        self.resources = Path("resources")
+        self.hp_dir = self.resources / "Headphones"
+        hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()]
+        self.hp_list = [x.name for x in hp_subdir]
 
     def load_HRTF(self):
         """
@@ -93,3 +101,27 @@ class HRTF:
         hrirs, sources, _ = pf.io.read_sofa(file)
         print("Loaded HRTF from web")
         return hrirs, sources
+    
+    # loads a specific headphone filter given by the path
+    # applies it to the hrir loaded
+    def load_hp_filter(self, name):
+        path = self.hp_dir / name
+        # load HRIRs and source positions
+        try: 
+            # this somehow always fails because of some bullshit with sofa conventions.
+            # thats why we load wavs instead
+            hp_filter, *_ = pf.io.read_sofa(path / "HpIRs.sofa")
+            print(f"Loaded Headphone Filter {name} from sofa")
+        except Exception as e:
+            print(e)
+            hp_filter = pf.io.read_audio(path / "HpFilter.wav")
+            print(f"Loaded Headphone Filter {name} from wav")
+        
+        # apply headphone filter to hrirs
+        self.hrirs = pf.dsp.convolve(self.hrirs, hp_filter, mdoe='full')
+        return hp_filter
+    
+    # sets hrirs to hrirs_linear
+    def reset_hrirs(self):
+        self.hrirs = self.hrirs_linear.copy()
+    

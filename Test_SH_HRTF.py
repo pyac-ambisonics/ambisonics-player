@@ -3,6 +3,7 @@ from HRTF import HRTF
 import pyfar as pf
 import numpy as np
 import time
+import shroom as ps
 
 def main():
     print("Loading ambi file")
@@ -28,7 +29,7 @@ def main():
 
     print("Write binaural audio file")
     start = time.time()
-    pf.io.write_audio(stereo, "written_binaural.wav")
+    pf.io.write_audio(stereo, "written_binaural_ls.wav")
     print(f"Writing file took {time.time() - start:.2f} seconds\n")
 
 def load_ambi_file():

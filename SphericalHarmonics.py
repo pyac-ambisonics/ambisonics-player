@@ -5,6 +5,7 @@ import pyfar as pf
 import spharpy as sh
 import time
 from HRTF import HRTF
+from HRTF_process import HRTF_process
 
 class SphericalHarmonics:
     """
@@ -47,37 +48,58 @@ class SphericalHarmonics:
         self.sampling_rate = sampling_rate
 
         if hrtf == None:
-            # load FABIAN from the web. replace this later!
-            self.hrtf = HRTF(None)
+            # load FABIAN from the web if no HRTF was given
+            self.hrtf = HRTF()
         else:
             self.hrtf = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
         if self.hrtf.hrirs.sampling_rate != sampling_rate:
-            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, sampling_rate=sampling_rate, match_amplitude='freq')
+            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, 
+                                              sampling_rate=sampling_rate, 
+                                              match_amplitude='freq'
+                                              )
 
         # store the sources in a Sampling Sphere
         self.sources = sh.SamplingSphere.from_coordinates(hrtf.sources)
 
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = ambi_order
-        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, normalization="SN3D", 
-                                                            basis_type='real', condon_shortley=False)
+        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, 
+                                                            normalization="SN3D", 
+                                                            basis_type='real', 
+                                                            condon_shortley=False
+                                                            )
 
         # create the spherical harmonics object from definition and sampling sphere
-        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, self.sources, inverse_method="pseudo_inverse")
+        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
+                                                                         self.sources, 
+                                                                         inverse_method="pseudo_inverse"
+                                                                         )
+
+        # create hrtf processing unit
+        process = HRTF_process()
 
         # create h_nm matrix 
-        print("doing matrix mult to get hrirs_nm")
-        hrirs_nm = (self.spherical_harmonics.basis_inv @ self.hrtf.hrirs).T
+        print("applying preprocessing to hrtf to get hrirs_nm")
+        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, 
+                                               self.spherical_harmonics,
+                                               algorithm='LS'
+                                               )
         print("convert to spherical harmonic signal")
-        self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, hrirs_nm.time, hrirs_nm.sampling_rate)
+        self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
+                                                                   hrirs_nm.time, 
+                                                                   hrirs_nm.sampling_rate
+                                                                   )
 
         # prepare a rotation matrix, with all angles 0 currently
         angles = [0, 0, 0]
         self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
         # calculate the rotation matrix once
         #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
+
+        # prepare pre_gain for gianstaging
+        self.pre_gain = self.find_gain()
     
     # set the current rotation angle
     def set_rotation(self, angles):
@@ -150,13 +172,19 @@ class SphericalHarmonics:
         # instantly store it as time data
         left_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[0, :, :], self.sampling_rate, domain='time'), # need to get the left channel here
+            pf.Signal(sh_hrir.time[0, :, :], 
+                      self.sampling_rate, 
+                      domain='time'
+                      ), # need to get the left channel here
             mode='full',
             method='overlap_add'
         ).time
         right_conv = pf.dsp.convolve(
             ambi_signal,
-            pf.Signal(sh_hrir.time[1, :, :], self.sampling_rate, domain='time'), # need to get the right channel here
+            pf.Signal(sh_hrir.time[1, :, :], 
+                      self.sampling_rate, 
+                      domain='time'
+                      ), # need to get the right channel here
             mode='full',
             method='overlap_add'
         ).time
@@ -168,17 +196,85 @@ class SphericalHarmonics:
         right_signal = np.sum(right_conv, axis=0)
 
         # do gain staging
-        # Find the maximum absolute value across both channels
-        peak = max(np.abs(left_signal).max(), np.abs(right_signal).max())
-        # Avoid division by zero
-        if peak > 0:
-            pre_gain = 0.99 / peak   # 0.99 leaves a tiny headroom
-            left_signal *= pre_gain * gain
-            right_signal *= pre_gain * gain
+        left_signal *= self.pre_gain * gain
+        right_signal *= self.pre_gain * gain
+        # possibly make a clipping warning
+        self.test_clipping([left_signal, right_signal])
 
         # create stereo signal by stacking the time data horizontally
         stereo_time = np.vstack((left_signal, right_signal))
-        stereo = pf.Signal(stereo_time, sampling_rate=self.sampling_rate, domain='time')
+        stereo = pf.Signal(stereo_time, 
+                           sampling_rate=self.sampling_rate, 
+                           domain='time'
+                           )
         print(f"Summing signals, Gainstaging and creating stereo took {time.time() - start:.4f} seconds")
 
         return stereo
+    
+    # find a good gain to apply to the stereo signal, based on the ambisonics order
+    def find_gain(self):
+        """
+        Compute a pre-gain factor for ambisonic-to-binaural rendering.
+
+        The method uses a simple empirical estimate (base ~4 dB) and scales it
+        with the square root of the number of ambisonic channels to account for
+        incoherent summation. The returned value is a linear gain (not dB)
+        that can be multiplied with the rendered stereo signals before clipping
+        checks and any user gain is applied.
+
+        Returns
+        -------
+        float
+            Linear gain factor to apply (positive scalar, typically < 1).
+        """
+
+        # thought process: 2 uncorrelated signals sum to +3dB
+        # 2 identical signals sum to +6dB
+        # so probably ours would sum to around +4.5dB? testing showed that 4 is good so far
+        # for each doubling of summed channels, this number is also doubled
+        estimate = 4
+
+        # by taking the square-root of the ambisonics order
+        # we get the doubling-factor to apply to our estimate
+        estimate *= np.sqrt(self.order_to_channel_n())
+        # B = 1 / 10^(estimate/20)
+        return 1 / np.pow(10, estimate * 0.05)
+    
+    # test if  the channels are clipping
+    def test_clipping(self, channels):
+        """
+        Check provided channels for clipping and print a warning if detected.
+
+        Parameters
+        ----------
+        channels : sequence of array_like
+            Iterable of 1-D arrays containing time-domain samples for each
+            channel (e.g., left and right). The function checks whether any
+            sample reaches or exceeds the amplitude threshold of 1.0 and
+            prints a warning message if clipping is found. This function has
+            no return value and only produces a console side-effect.
+        """
+
+        for channel in channels:
+            # test for clipping
+            if np.max(channel) >= 1:
+                print("\n####################\n" \
+                "WARNING! WARNING" \
+                "clipping detected!\n" \
+                "####################")
+    
+    # calculates the nummer of channels corresponding to the ambisonics order
+    def order_to_channel_n(self):
+        """
+        Return the number of spherical-harmonic channels for the current order.
+
+        For a given ambisonic order N the number of channels is (N + 1)^2.
+
+        Returns
+        -------
+        int
+            Number of spherical-harmonic/ambisonic channels.
+        """
+
+        return (self.ambi_order + 1)**2
+
