@@ -114,10 +114,14 @@ class AmbisonicsFile:
                 self._empty_channels = []
                 logger.warning("Keeping all channels, decoding may fail")
         else:
+            max_order = int(np.floor(np.sqrt(self.num_channels))) - 1
             raise ValueError(
-            f"File has only {self.num_channels} channels, but Ambisonics order {self.order} "
-            f"requires at least {expected_channels} channels. The file is incomplete or not "
-            f"a valid Ambisonics file of the specified order.")
+                f"Requested Ambisonics order {self.order} requires "
+                f"{(self.order + 1) ** 2} channels, but the file only has "
+                f"{self.num_channels} channels. "
+                f"The maximum supported order for this file is {max_order} "
+                f"(requires {(max_order + 1) ** 2} channels). "
+                f"Please re-select an order ≤ {max_order}."
 
     # ==============================================================
     # Frame reading
