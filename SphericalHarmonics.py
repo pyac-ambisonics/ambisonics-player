@@ -81,10 +81,10 @@ class SphericalHarmonics:
         process = HRTF_process()
 
         # create h_nm matrix 
-        print("applying preprocessing to hrrtf to get hrirs_nm")
+        print("applying preprocessing to hrtf to get hrirs_nm")
         hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
-                                               algorithm='MagLS'
+                                               algorithm='LS'
                                                )
         print("convert to spherical harmonic signal")
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
