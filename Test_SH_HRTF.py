@@ -23,21 +23,40 @@ def main():
     start = time.time()
     harmonics = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi_file.get_samplerate(), ambi_order=ambi_order)
     print(f"{harmonics.ambi_order=}")
-    print(f"{harmonics.hrirs_nm.cshape=}")
+    print(f"{harmonics.hrirs_nm.shape=}")
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
-    print("Apply HRTF")
+
+    # print("Apply HRTF pyfar")
+    # start = time.time()
+    # stereo2 = overlap_add(ambi_file, harmonics, gain=0.5)
+    # #stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
+    # print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
+
+    
+    print("Apply HRTF numpy")
     start = time.time()
-    stereo = overlap_add(ambi_file, harmonics, gain=0.5)
+    stereo = overlap_add_fast(ambi_file, harmonics, gain=0.5)
     #stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
     print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Write binaural audio file")
     start = time.time()
-    pf.io.write_audio(stereo, "written_binaural_oa.wav")
+    pf.io.write_audio(stereo, "written_binaural_fast_oa.wav")
     print(f"Writing file took {time.time() - start:.2f} seconds\n")
 
 def overlap_add(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.):
+
+    # Check channel count by comparing the channel shape
+    # we know the channel shape for sh_hrir is (2, channels)
+    *_, sh_hrir_ch = sh.hrirs_nm.cshape
+    if ambi_file.get_num_channels() != sh_hrir_ch:
+        raise ValueError("Channel counts must match (16 for 3rd order).")
+    
+    
+    if gain > 1. or gain < 0:
+        raise AttributeError("The gain must be in range [0., 1.].")
+    
     # current impulse response length M
     sh_length = sh.get_IR_length()
     # block size L
@@ -61,12 +80,10 @@ def overlap_add(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.):
         if chunk is None:
             break
 
-        # transpose chunk to correct shape (currently n_samples, n_channels
-        chunk = chunk.T
         # zero pad and make a signal
         pad_width = N - len(chunk[0])
-        chunk_pad = np.pad(chunk, ((0,0),(0, pad_width)))
-        chunk_sig = pf.Signal(chunk_pad, ambi_file.get_samplerate())
+        chunk_pad = np.pad(chunk, ((0,pad_width),(0, 0)))
+        chunk_sig = pf.Signal(chunk_pad.T, ambi_file.get_samplerate())
 
         # apply hrtf
         stereo = sh.apply_hrtf(chunk_sig, gain, pad=True, pad_length=required_pad)
@@ -84,6 +101,63 @@ def overlap_add(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.):
             # write the last overlap_buffer to our output
             output_buffer[:, pos:pos + sh_length - 1] = overlap_buffer
             break
+
+
+def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.):
+
+    # Check channel count by comparing the channel shape
+    # we know the channel shape for sh_hrir is (2, channels)
+    _, sh_hrir_ch, _ = sh.hrirs_nm.shape
+    if ambi_file.get_num_channels() != sh_hrir_ch:
+        raise ValueError("Channel counts must match (16 for 3rd order).")
+    
+    if gain > 1. or gain < 0:
+        raise AttributeError("The gain must be in range [0., 1.].")
+    
+    # current impulse response length M
+    sh_length = sh.get_IR_length()
+    # block size L
+    block_size = ambi_file.get_chunk_size()
+    # possibly validate that chunk size is a power of 2!!
+
+    # compute N >= M + L - 1
+    N = next_power_of_two(sh_length + block_size - 1)
+    # amount we need to pad our HRTF to
+    required_pad = block_size - sh_length
+
+    # allocate buffers
+    overlap_buffer = np.zeros((2, sh_length - 1), dtype=np.float32)
+    output_length = ambi_file.total_frames + sh_length - 1
+    output_buffer = np.zeros((2, output_length), dtype=np.float32)
+    pos = 0
+
+    # core loop to process each chunk
+    while True:
+        chunk, end_of_file = ambi_file.get_next_chunk()
+
+        # update our block size
+        block_size, *_ = chunk.shape
+        # break if our chunk is None
+        if chunk is None:
+            break
+
+        # apply hrtf
+        stereo = sh.apply_hrtf_fast(chunk, N, gain)
+        # add overlap to stereo output
+        stereo[:,:sh_length-1] += overlap_buffer
+        # add stereo to output buffer
+        output_buffer[:, pos:pos + block_size] = stereo[:,:block_size]
+        # save new overlap buffer
+        overlap_buffer = stereo[:, block_size:block_size + sh_length - 1]
+        #update position
+        pos += block_size
+        
+        # escape the loop if we reacehd the end of the file
+        if end_of_file:
+            # write the last overlap_buffer to our output
+            output_buffer[:, pos:pos + sh_length - 1] = overlap_buffer
+            break
+
 
     # create final pyfar signal
     stereo = pf.Signal(output_buffer, 

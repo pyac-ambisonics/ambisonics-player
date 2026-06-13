@@ -3,7 +3,7 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-import time
+from scipy import signal as sgn
 from HRTF import HRTF
 from HRTF_process import HRTF_process
 
@@ -90,19 +90,30 @@ class SphericalHarmonics:
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
                                                                    hrirs_nm.time, 
                                                                    hrirs_nm.sampling_rate
-                                                                   )
+                                                                   ).time
+        
+        # make a copy as "base" hrirs_nm
+        self.hrirs_nm_base = self.hrirs_nm.copy()
+        # prepare an N3D object for rotations
+        self.hrirs_nm_base_n3d = sh.spherical.renormalize(self.hrirs_nm_base, 
+                                                          channel_convention='ACN',
+                                                          current_norm='SN3D',
+                                                          target_norm='N3D',
+                                                          axis=1)
 
         # prepare a rotation matrix, with all angles 0 currently
         angles = [0, 0, 0]
-        self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
-        # calculate the rotation matrix once
-        #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
+        self.set_rotation(angles)
+        # self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
+        # # calculate the rotation matrix once
+        # self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self.find_gain()
 
     def get_IR_length(self):
-        return self.hrirs_nm.n_samples
+        *_, n_samples = self.hrirs_nm.shape
+        return n_samples
     
     # set the current rotation angle
     def set_rotation(self, angles):
@@ -114,27 +125,18 @@ class SphericalHarmonics:
         angles : sequence of float
             Euler angles in degrees as (alpha, beta, gamma).
         """
+        self.rotation_matrix =sh.transforms.wigner_d_rotation(self.ambi_order, *angles)
+        self.rotation_matrix = self.rotation_matrix.astype(np.float32)
 
-        self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
-        # recalculate the rotation matrix once
-        #self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
+        hrirs_nm_n3d = self.rotation_matrix @ self.hrirs_nm_base_n3d
+        
+        self.hrirs_nm = sh.spherical.renormalize(hrirs_nm_n3d, 
+                                                 channel_convention='ACN',
+                                                 current_norm='N3D',
+                                                 target_norm='SN3D',
+                                                 axis=1)
+        #self.hrirs_nm = self.rotation.apply(self.hrirs_nm_base)
 
-    # apply a rotation and return them as signal
-    def apply_rotation(self):
-        """
-        Apply the current spherical-harmonic rotation to `hrirs_nm` and
-        return the rotated Signal.
-
-        Returns
-        -------
-        hrirs_rotated : pyfar.Signal
-            Time-domain HRIRs after rotation.
-        """
-
-        # creates rotated HRIRs matrix
-        #hrirs_nm_rotated = self.rotation_matrix @ self.hrirs_nm
-        hrirs_nm_rotated = self.rotation.apply(self.hrirs_nm)
-        return hrirs_nm_rotated
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1., pad=False, pad_length=0):
@@ -158,7 +160,7 @@ class SphericalHarmonics:
             raise AttributeError("The gain must be in range [0., 1.].")
 
         # apply rotation to the sh_hrir
-        sh_hrir = self.apply_rotation()
+        #sh_hrir = self.apply_rotation()
 
         # Check channel count by comparing the channel shape
         # we know the channel shape for ambi_signal is (channels,)
@@ -217,6 +219,59 @@ class SphericalHarmonics:
 
         return stereo_time
     
+    # apply the hrtf data to an ambisonics file
+    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024, gain=1.):
+        """
+        Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
+
+        Parameters
+        ----------
+        ambi_signal : np.ndarray
+            Ambisonic input signal (should have shape (n_samples, n_channels)).
+        gain : float, optional
+            A float between 0. and 1., applied after internal gain-staging, Default is 1.
+
+        Returns
+        -------
+        stereo : np.ndarray
+            Stereo binaural signal (2 x n_samples) after convolution and gain staging.
+        """
+    
+        # checking of channel count should be done elsewhere
+        # check for correct gain also elsewhere!
+
+        # apply rotation to the sh_hrir
+        # decide: rotate ambisonics signal, or rotate SH data. don't rotate both!
+        #rotated_signal = self.rotation_matrix @ ambi_signal
+
+        # sh_hrir should have the shape (2, ambi_channels, n bins)
+        fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+
+        # make fft of our ambi signal. shape (n_samples, n_channels)
+        fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
+
+        # convolve by multiplication in time domain over all channels, for each ear
+        n_samples, *_ = fft_ambi.shape
+        #fft_conv = np.ndarray((2, chan_count, n_samples), dtype=np.float32)
+        fft_sum = np.ndarray((2, n_samples), dtype=np.float32)
+
+        for ear in range(2):
+            #for chan in range(chan_count):
+                # cult in freq domain is convolution in time
+            #fft_conv[ear, chan] = fft_ambi[:, chan] * fft_sh[ear, chan, :]
+            fft_sum[ear] = np.sum(fft_ambi.T * fft_sh[ear, :, :], axis=0)
+        
+        # fft_conv = [sgn.fftconvolve(ambi_signal.T, sh_hrir.time[0, :, :], mode='full', axes=-1),
+        #             sgn.fftconvolve(ambi_signal.T, sh_hrir.time[1, :, :], mode='full', axes=-1)]
+
+        # Sum over channels -> single‑channel binaural signals
+        sum_conv = np.real(np.fft.ifft(fft_sum))
+
+        # do gain staging
+        sum_conv *= self.pre_gain * gain
+        # no test for clipping because of time
+        return sum_conv
+    
     # find a good gain to apply to the stereo signal, based on the ambisonics order
     def find_gain(self):
         """
@@ -244,7 +299,7 @@ class SphericalHarmonics:
         # we get the doubling-factor to apply to our estimate
         estimate *= np.sqrt(self.order_to_channel_n())
         # B = 1 / 10^(estimate/20)
-        return 1 / np.pow(10, estimate * 0.05)
+        return 1 / np.pow(10, estimate * 0.05, dtype=np.float32)
     
     # test if  the channels are clipping
     def test_clipping(self, channels):
