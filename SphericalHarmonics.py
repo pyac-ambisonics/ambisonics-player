@@ -100,6 +100,8 @@ class SphericalHarmonics:
                                                           current_norm='SN3D',
                                                           target_norm='N3D',
                                                           axis=1)
+        
+        *_, self.pad_to_length = self.hrirs_nm.shape
 
         # prepare a rotation matrix, with all angles 0 currently
         angles = [0, 0, 0]
@@ -128,13 +130,18 @@ class SphericalHarmonics:
         self.rotation_matrix =sh.transforms.wigner_d_rotation(self.ambi_order, *angles)
         self.rotation_matrix = self.rotation_matrix.astype(np.float32)
 
+        # rotation only works in N3D normalization
         hrirs_nm_n3d = self.rotation_matrix @ self.hrirs_nm_base_n3d
         
+        # convert back to SN3D normalization
         self.hrirs_nm = sh.spherical.renormalize(hrirs_nm_n3d, 
                                                  channel_convention='ACN',
                                                  current_norm='N3D',
                                                  target_norm='SN3D',
                                                  axis=1)
+        
+        # update the fft
+        self.update_hrirs_fft(self.pad_to_length)
         #self.hrirs_nm = self.rotation.apply(self.hrirs_nm_base)
 
     
@@ -245,7 +252,7 @@ class SphericalHarmonics:
         #rotated_signal = self.rotation_matrix @ ambi_signal
 
         # sh_hrir should have the shape (2, ambi_channels, n bins)
-        fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+        #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
 
         # make fft of our ambi signal. shape (n_samples, n_channels)
         fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
@@ -259,7 +266,7 @@ class SphericalHarmonics:
             #for chan in range(chan_count):
                 # cult in freq domain is convolution in time
             #fft_conv[ear, chan] = fft_ambi[:, chan] * fft_sh[ear, chan, :]
-            fft_sum[ear] = np.sum(fft_ambi.T * fft_sh[ear, :, :], axis=0)
+            fft_sum[ear] = np.sum(fft_ambi.T * self.hrirs_nm_fft[ear, :, :], axis=0)
         
         # fft_conv = [sgn.fftconvolve(ambi_signal.T, sh_hrir.time[0, :, :], mode='full', axes=-1),
         #             sgn.fftconvolve(ambi_signal.T, sh_hrir.time[1, :, :], mode='full', axes=-1)]
@@ -271,6 +278,12 @@ class SphericalHarmonics:
         sum_conv *= self.pre_gain * gain
         # no test for clipping because of time
         return sum_conv
+    
+    # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
+    # with ambisonics audio
+    def update_hrirs_fft(self, block_size: int):
+        self.pad_to_length = block_size
+        self.hrirs_nm_fft = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
     
     # find a good gain to apply to the stereo signal, based on the ambisonics order
     def find_gain(self):

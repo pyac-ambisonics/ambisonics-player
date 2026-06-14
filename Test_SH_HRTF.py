@@ -122,8 +122,9 @@ def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.)
 
     # compute N >= M + L - 1
     N = next_power_of_two(sh_length + block_size - 1)
-    # amount we need to pad our HRTF to
-    required_pad = block_size - sh_length
+
+    # update our sh fft coefficients once (and on each rotation update)
+    sh.update_hrirs_fft(N)
 
     # allocate buffers
     overlap_buffer = np.zeros((2, sh_length - 1), dtype=np.float32)
