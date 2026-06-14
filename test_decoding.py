@@ -16,13 +16,14 @@ def main():
     print("Loading ambi file")
     start = time.time()
     # ambi_file, ambi_order = load_ambi_file("Ambisonics_Noise_3rd_order_noise_dir.wav")
-    ambi_file = AmbisonicsFile("Ambisonics_Noise_3rd_order_noise_dir.wav", chunk_size=1024)
+    ambi_file = AmbisonicsFile("Ambisonics_Noise_3rd_order_noise_dir.wav", chunk_size=512)
     ambi_order = ambi_file.get_order()
     print(f"Loading ambi file took {time.time() - start:.4f} seconds\n")
 
     print("Load HRTFs")
     start = time.time()
     hrtf = HRTF("FABIAN_HRIR_measured_HATO_0.sofa")
+    #hrtf.load_hp_filter("Audio-technica ATH M50x")
     print(f"Loading HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Creating Spherical Harmonics")

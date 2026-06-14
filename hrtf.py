@@ -150,12 +150,13 @@ class HRTF:
             hp_filter, *_ = pf.io.read_sofa(path / "HpIRs.sofa")
             print(f"Loaded Headphone Filter {name} from sofa")
         except Exception as e:
-            print(e)
+            #print(e)
             hp_filter = pf.io.read_audio(path / "HpFilter.wav")
             print(f"Loaded Headphone Filter {name} from wav")
         
         # apply headphone filter to hrirs
-        self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mdoe='full')
+        self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
+        print(f"Samplelength of HRIR: {self.get_IR_length()}")
         return hp_filter
     
     # sets hrirs to hrirs_linear
@@ -231,7 +232,7 @@ class Processing:
 
         match algorithm:
             case 'LS':
-                print("Using standard spherical harmonics processing (Least Squares)")
+                print("Using standard spherical harmonics processing (Least Squares): Simple matrix multiplication.")
                 self.current_algorithm = algorithm
                 return self.__ls(hrirs, sh)
             case 'MagLS':
@@ -268,7 +269,6 @@ class Processing:
         Result of sh.basis_inv @ hrirs, transposed to the expected shape.
         """
 
-        print("Using LS method: Simple matrix multiplication.")
         return (sh.basis_inv @ hrirs).T
 
     # apply the magnitude least squares algorithm for better results for low order ambisonics
@@ -299,7 +299,6 @@ class Processing:
         This function performs per-frequency optimization and is computationally heavier than LS.
         """
 
-        print("Using MagLS method.")
         # make our data frequency data
         hrirs_freq = hrirs.freq_raw.copy()
         # find corresponding frequency bin
@@ -330,10 +329,9 @@ class Processing:
         # do regular  least squares -> simple matrix mult
         hrirs_sh = (sh.basis_inv @ hrirs).T.freq_raw
         nm_magls = hrirs_sh.copy()
-        
         sh_basis = sh.basis.copy()
+
         # for each ear, for each frequency, starting at the cutoff bin
-        print("Solving Magnitude Least Squares for each frequency bin.")
         for ear in range(2):
             for f in range(start, freq_axis.size):
                 # for each ear, all directional data, and the current frequency: find magls
@@ -354,7 +352,6 @@ class Processing:
                     + (1 - alpha[f]) * hrirs_sh[ear, :, f]
                 )
         
-        print("Creating pyfar signal from calculated Magnitude Least Squares frequencies.")
         # create time domain by creating a pyfar Signal from frequency data
         hrirs_sh_time = pf.Signal(nm_magls, hrirs.sampling_rate, n_samples=hrirs.n_samples, domain='freq')
         return hrirs_sh_time
