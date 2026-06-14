@@ -55,6 +55,10 @@ class HRTF:
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()]
         self.hp_list = [x.name for x in hp_subdir]
 
+    def get_IR_length(self):
+        # returns the length of the HRTF impulse response
+        return self.hrirs.n_samples
+
     def load_HRTF(self):
         """
         Load HRTF data from a SOFA file or fall back to a web download.
