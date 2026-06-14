@@ -12,27 +12,42 @@ class HRTF_process:
         # the different algorithms available
         self.algorithms = ['LS', 'MagLS', 'TA', 'BiMagLS']
         # the current algorithm
-        self.current = 'LS'
+        self.current_algorithm = 'LS'
         # the number of frequency bins we use for doing FFT
         self.n_bins = 2048
+        # for each algorithm, a different pre-gain might be necessary.
+        self.__gain = {
+            'LS': 1., 
+            'MagLS': 1.28, 
+            'TA': 1., 
+            'BiMagLS': 1.28
+        }
+
+    def get_gain(self):
+        return self.__gain[self.current_algorithm]
 
     # apply the chosen preprocessing algorithm. use MagLS as default
     def apply_preprocessing(self, hrirs, sh, algorithm='LS'):
         match algorithm:
             case 'LS':
                 print("Using standard spherical harmonics processing (Least Squares)")
+                self.current_algorithm = algorithm
                 return self.__ls(hrirs, sh)
             case 'MagLS':
                 print("Using MagLS HRTF Preprocessing")
+                self.current_algorithm = algorithm
                 return self.__mag_ls(hrirs, sh)
             case 'TA':
                 print("TA not implemented yet. Using MagLS instead")
+                self.current_algorithm = algorithm
                 return self.__mag_ls(hrirs, sh)
             case 'BiMagLS':
                 print("BiMagLS not implemented yet. Using MagLS instead")
+                self.current_algorithm = algorithm
                 return self.__mag_ls(hrirs, sh)
             case _:
                 print("Using default spherical harmonics processing (Least Squares)")
+                self.current_algorithm = algorithm
                 return self.__ls(hrirs, sh)
 
     # solves the Least Squares Problem. This means just applying the spherical Harmonics to the HRTF
@@ -42,18 +57,19 @@ class HRTF_process:
 
     # apply the magnitude least squares algorithm for better results for low order ambisonics
     # ramp = 0 -> no ramp. ramp = 1 -> default ramp (cutoff * (1/sqrt(2))). ramp > 1 -> specific ramp in freq
-    def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=3000, ramp=1):
+    def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=2000, ramp=1):
         print("Using MagLS method.")
         # make our data frequency data
         hrirs_freq = hrirs.freq_raw.copy()
         # find corresponding frequency bin
         freq_axis = hrirs.frequencies
-        freq_idx = hrirs.find_nearest_frequency(cutoff)
+        stop = hrirs.find_nearest_frequency(cutoff)
 
         # create alpha value for each frequency: possibly with a ramp up? or just 0/1?
         # with just 0/1 we might have to smooth the phase later
         alpha = np.zeros_like(freq_axis, dtype=float)
-        alpha[freq_idx:] = 1
+        alpha[stop:] = 1
+        start = stop
 
         
         # make a ramp up if needed. Use Hanning for smoothness
@@ -68,7 +84,6 @@ class HRTF_process:
             # create a Hanning window, use the half that goes from 0 -> 1
             win = np.hanning(2*length)[:length]
             alpha[start:start+length] = win
-        print("Created ramp successfully")
 
         # below cutoff: do simple least squares
         # do regular  least squares -> simple matrix mult
@@ -76,9 +91,6 @@ class HRTF_process:
         nm_magls = hrirs_sh.copy()
         
         sh_basis = sh.basis.copy()
-        print(f"{hrirs_freq.shape=}")
-        print(f"{nm_magls.shape=}")
-        print(f"{sh_basis.shape=}")
         # for each ear, for each frequency, starting at the cutoff bin
         print("Solving Magnitude Least Squares for each frequency bin.")
         for ear in range(2):
@@ -92,7 +104,7 @@ class HRTF_process:
                     alpha[f] * sh_util.magls(A=sh_basis, 
                                              b=hrirs_freq[:, ear, f], 
                                              x_prev=nm_magls[ear, :, f-1]
-                                             ) *
+                                             )
                     # our own solution
                     # alpha[f] * self.__mag_ls_solver(Y=sh_basis, 
                     #                                 target=hrirs_freq[:, ear, f], 

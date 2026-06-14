@@ -78,13 +78,13 @@ class SphericalHarmonics:
                                                                          )
 
         # create hrtf processing unit
-        process = HRTF_process()
+        self.process = HRTF_process()
 
         # create h_nm matrix 
         print("applying preprocessing to hrtf to get hrirs_nm")
-        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, 
+        hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
-                                               algorithm='LS'
+                                               algorithm='MagLS'
                                                )
         print("convert to spherical harmonic signal")
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
@@ -303,6 +303,10 @@ class SphericalHarmonics:
         # so probably ours would sum to around +4.5dB? testing showed that 4 is good so far
         # for each doubling of summed channels, this number is also doubled
         estimate = 4
+
+        # estimate is then adjusted, depending on the HRTF preprocessing algorithm used
+        i = self.process.get_gain()
+        estimate *= i
 
         # by taking the square-root of the ambisonics order
         # we get the doubling-factor to apply to our estimate
