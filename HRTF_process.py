@@ -57,7 +57,7 @@ class HRTF_process:
 
     # apply the magnitude least squares algorithm for better results for low order ambisonics
     # ramp = 0 -> no ramp. ramp = 1 -> default ramp (cutoff * (1/sqrt(2))). ramp > 1 -> specific ramp in freq
-    def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=2000, ramp=1):
+    def __mag_ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics, cutoff=3000, ramp=1):
         print("Using MagLS method.")
         # make our data frequency data
         hrirs_freq = hrirs.freq_raw.copy()
