@@ -37,7 +37,7 @@ class AmbisonicsFile:
         filepath: str,
         chunk_size: int = 2048,
         order: Optional[int] = None,
-        trim_extra_channels: bool = True, 
+        trim_extra_channels: bool = True,
     ):
 
         self.filepath = filepath
@@ -54,6 +54,12 @@ class AmbisonicsFile:
         self.total_frames = len(self.file)
 
         self.duration = self.total_frames / self.samplerate
+
+        # ==========================================================
+        # Validate AmbiX format
+        # ==========================================================
+
+        self._validate_ambix_format()
 
         # ==========================================================
         # Determine Ambisonics order
@@ -89,6 +95,45 @@ class AmbisonicsFile:
         self._print_load_info()
 
     # ==============================================================
+    # AmbiX format validation
+    # ==============================================================
+
+    def _validate_ambix_format(self):
+
+        # Check 1: Must be a WAV file
+        file_format = self.file.format
+        if file_format != 'WAV':
+            raise ValueError(
+                f"Expected WAV format for AmbiX, got '{file_format}'. "
+                f"Only AmbiX (ACN/SN3D) files in WAV containers are supported."
+            )
+
+        # Check 2: Channel count must follow (n+1)^2 for some integer n >= 0
+        num_channels = self.num_channels
+        order_candidate = int(np.sqrt(num_channels)) - 1
+
+        if num_channels < 1 or (order_candidate + 1) ** 2 != num_channels:
+            raise ValueError(
+                f"File has {num_channels} channels, which does not match any "
+                f"Ambisonics order. Expected (n+1)^2 channels (e.g., 1, 4, 9, "
+                f"16, 25, 36, 49, 64). "
+                f"This file may not be a valid AmbiX format file."
+            )
+
+        # Check 3: For multi-channel audio, verify format tag
+        if num_channels > 2:
+            subtype = self.file.subtype
+            logger.debug(
+                "WAV format: %s, subtype: %s, channels: %d",
+                file_format, subtype, num_channels
+            )
+
+        logger.info(
+            "AmbiX format validated: order %d candidate, %d channels",
+            order_candidate, num_channels
+        )
+
+    # ==============================================================
     # Channel setup
     # ==============================================================
 
@@ -114,10 +159,12 @@ class AmbisonicsFile:
                 self._empty_channels = []
                 logger.warning("Keeping all channels, decoding may fail")
         else:
+            max_order = int(np.sqrt(self.num_channels)) - 1
             raise ValueError(
-            f"File has only {self.num_channels} channels, but Ambisonics order {self.order} "
-            f"requires at least {expected_channels} channels. The file is incomplete or not "
-            f"a valid Ambisonics file of the specified order.")
+                f"File has only {self.num_channels} channels, but Ambisonics order "
+                f"{self.order} requires {expected_channels} channels. "
+                f"The maximum order supported by this file is {max_order}. "
+                f"Please reduce the playback order or use a file with more channels.")
 
     # ==============================================================
     # Frame reading
