@@ -37,11 +37,11 @@ class AmbisonicsFile:
         filepath: str,
         chunk_size: int = 2048,
         order: Optional[int] = None,
-        trim_extra_channels: bool = True, 
+        trim_extra_channels: bool = True,
     ):
 
         self.filepath = filepath
-        self.chunk_size = max(1024, min(8192, chunk_size))
+        self.chunk_size = self._normalize_chunk_size(chunk_size)
 
         # ==========================================================
         # Use soundfile for STREAMING instead of loading entire file
@@ -54,6 +54,12 @@ class AmbisonicsFile:
         self.total_frames = len(self.file)
 
         self.duration = self.total_frames / self.samplerate
+
+        # ==========================================================
+        # Validate AmbiX format
+        # ==========================================================
+
+        self._validate_ambix_format()
 
         # ==========================================================
         # Determine Ambisonics order
@@ -89,6 +95,45 @@ class AmbisonicsFile:
         self._print_load_info()
 
     # ==============================================================
+    # AmbiX format validation
+    # ==============================================================
+
+    def _validate_ambix_format(self):
+
+        # Check 1: Must be a WAV file
+        file_format = self.file.format
+        if file_format != 'WAV':
+            raise ValueError(
+                f"Expected WAV format for AmbiX, got '{file_format}'. "
+                f"Only AmbiX (ACN/SN3D) files in WAV containers are supported."
+            )
+
+        # Check 2: Channel count must follow (n+1)^2 for some integer n >= 0
+        num_channels = self.num_channels
+        order_candidate = int(np.sqrt(num_channels)) - 1
+
+        if num_channels < 1 or (order_candidate + 1) ** 2 != num_channels:
+            raise ValueError(
+                f"File has {num_channels} channels, which does not match any "
+                f"Ambisonics order. Expected (n+1)^2 channels (e.g., 1, 4, 9, "
+                f"16, 25, 36, 49, 64). "
+                f"This file may not be a valid AmbiX format file."
+            )
+
+        # Check 3: For multi-channel audio, verify format tag
+        if num_channels > 2:
+            subtype = self.file.subtype
+            logger.debug(
+                "WAV format: %s, subtype: %s, channels: %d",
+                file_format, subtype, num_channels
+            )
+
+        logger.info(
+            "AmbiX format validated: order %d candidate, %d channels",
+            order_candidate, num_channels
+        )
+
+    # ==============================================================
     # Channel setup
     # ==============================================================
 
@@ -114,15 +159,12 @@ class AmbisonicsFile:
                 self._empty_channels = []
                 logger.warning("Keeping all channels, decoding may fail")
         else:
-            max_order = int(np.floor(np.sqrt(self.num_channels))) - 1
+            max_order = int(np.sqrt(self.num_channels)) - 1
             raise ValueError(
-                f"Requested Ambisonics order {self.order} requires "
-                f"{(self.order + 1) ** 2} channels, but the file only has "
-                f"{self.num_channels} channels. "
-                f"The maximum supported order for this file is {max_order} "
-                f"(requires {(max_order + 1) ** 2} channels). "
-                f"Please re-select an order ≤ {max_order}."
-            )
+                f"File has only {self.num_channels} channels, but Ambisonics order "
+                f"{self.order} requires {expected_channels} channels. "
+                f"The maximum order supported by this file is {max_order}. "
+                f"Please reduce the playback order or use a file with more channels.")
 
     # ==============================================================
     # Frame reading
@@ -216,8 +258,10 @@ class AmbisonicsFile:
             num_samples
         )
 
+        # get_frames() returns (samples, channels)
+        # pyfar.Signal expects (channels, samples) — last dim is time
         return pf.Signal(
-            chunk,
+            chunk.T,
             self.samplerate,
             domain='time',
             fft_norm='none'
@@ -279,12 +323,20 @@ class AmbisonicsFile:
     def get_chunk_size(self) -> int:
         return self.chunk_size
 
-    def set_chunk_size(self, chunk_size: int):
+    @staticmethod
+    def _normalize_chunk_size(chunk_size: int) -> int:
 
-        self.chunk_size = max(
-            1024,
-            min(8192, chunk_size)
-        )
+        # Clamp to valid range
+        chunk_size = max(32, min(8192, chunk_size))
+
+        # Round up to nearest power of two: 1 << (n - 1).bit_length()
+        if chunk_size > 1:
+            chunk_size = 1 << (chunk_size - 1).bit_length()
+
+        return chunk_size
+
+    def set_chunk_size(self, chunk_size: int):
+        self.chunk_size = self._normalize_chunk_size(chunk_size)
 
         logger.info(
             "Chunk size changed to %d",
