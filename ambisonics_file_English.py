@@ -41,7 +41,7 @@ class AmbisonicsFile:
     ):
 
         self.filepath = filepath
-        self.chunk_size = max(1024, min(8192, chunk_size))
+        self.chunk_size = self._normalize_chunk_size(chunk_size)
 
         # ==========================================================
         # Use soundfile for STREAMING instead of loading entire file
@@ -99,6 +99,13 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _validate_ambix_format(self):
+        """Validate that the loaded file is a valid AmbiX (ACN/SN3D) file.
+
+        Checks performed:
+        1. File format is WAV (AmbiX files are WAV containers)
+        2. Channel count follows the (n+1)^2 pattern for Ambisonics
+        3. WAV format tag is appropriate for multi-channel audio (>2 channels)
+        """
 
         # Check 1: Must be a WAV file
         file_format = self.file.format
@@ -258,6 +265,8 @@ class AmbisonicsFile:
             num_samples
         )
 
+        # get_frames() returns (samples, channels)
+        # pyfar.Signal expects (channels, samples) — last dim is time
         return pf.Signal(
             chunk.T,
             self.samplerate,
@@ -321,12 +330,20 @@ class AmbisonicsFile:
     def get_chunk_size(self) -> int:
         return self.chunk_size
 
-    def set_chunk_size(self, chunk_size: int):
+    @staticmethod
+    def _normalize_chunk_size(chunk_size: int) -> int:
 
-        self.chunk_size = max(
-            1024,
-            min(8192, chunk_size)
-        )
+        # Clamp to valid range
+        chunk_size = max(32, min(8192, chunk_size))
+
+        # Round up to nearest power of two: 1 << (n - 1).bit_length()
+        if chunk_size > 1:
+            chunk_size = 1 << (chunk_size - 1).bit_length()
+
+        return chunk_size
+
+    def set_chunk_size(self, chunk_size: int):
+        self.chunk_size = self._normalize_chunk_size(chunk_size)
 
         logger.info(
             "Chunk size changed to %d",
