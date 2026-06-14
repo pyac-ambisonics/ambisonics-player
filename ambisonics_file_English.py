@@ -122,6 +122,7 @@ class AmbisonicsFile:
                 f"The maximum supported order for this file is {max_order} "
                 f"(requires {(max_order + 1) ** 2} channels). "
                 f"Please re-select an order ≤ {max_order}."
+            )
 
     # ==============================================================
     # Frame reading
