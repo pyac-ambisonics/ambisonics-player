@@ -259,7 +259,7 @@ class AmbisonicsFile:
         )
 
         return pf.Signal(
-            chunk,
+            chunk.T,
             self.samplerate,
             domain='time',
             fft_norm='none'
