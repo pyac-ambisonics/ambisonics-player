@@ -27,11 +27,11 @@ def main():
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
 
-    # print("Apply HRTF pyfar")
-    # start = time.time()
-    # stereo2 = overlap_add(ambi_file, harmonics, gain=0.5)
-    # #stereo = harmonics.apply_hrtf(ambi_signal=ambi_file, gain=0.5)
-    # print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
+    print("Apply HRTF pyfar")
+    start = time.time()
+    ambi_file2, ambi_order2 = load_ambi_file()
+    stereo2 = harmonics.apply_hrtf(ambi_signal=ambi_file2, gain=0.5)
+    print(f"Applying HRTF took {time.time() - start:.4f} seconds\n")
 
     
     print("Apply HRTF numpy")

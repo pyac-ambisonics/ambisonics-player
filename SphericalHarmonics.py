@@ -146,7 +146,7 @@ class SphericalHarmonics:
 
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf(self, ambi_signal: pf.Signal, gain=1., pad=False, pad_length=0):
+    def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
         """
         Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
 
@@ -167,24 +167,20 @@ class SphericalHarmonics:
             raise AttributeError("The gain must be in range [0., 1.].")
 
         # apply rotation to the sh_hrir
-        #sh_hrir = self.apply_rotation()
+        sh_hrir = self.hrirs_nm.copy()
 
         # Check channel count by comparing the channel shape
         # we know the channel shape for ambi_signal is (channels,)
         ambi_ch, *_ = ambi_signal.cshape
         # we know the channel shape for sh_hrir is (2, channels)
-        *_, sh_hrir_ch = sh_hrir.cshape
+        _, sh_hrir_ch, _ = sh_hrir.shape
         if ambi_ch != sh_hrir_ch:
             raise ValueError("Channel counts must match (16 for 3rd order).")
 
         # create our time signals
-        left = sh_hrir.time[0, :, :]
-        right = sh_hrir.time[1, :, :]
+        left = sh_hrir[0, :, :]
+        right = sh_hrir[1, :, :]
 
-        # pad if needed
-        if pad:
-            left = np.pad(left, ((0,0),(0,pad_length)))
-            right = np.pad(right, ((0,0),(0,pad_length)))
         # sh_hrir should have the shape (2, ambi_order)
         # Convolve each channel separately for left and right
         # instantly store it as time data
