@@ -260,7 +260,7 @@ class SphericalHarmonics:
         # convolve by multiplication in time domain over all channels, for each ear
         n_samples, *_ = fft_ambi.shape
         #fft_conv = np.ndarray((2, chan_count, n_samples), dtype=np.float32)
-        fft_sum = np.ndarray((2, n_samples), dtype=np.float32)
+        fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
             #for chan in range(chan_count):
@@ -272,7 +272,7 @@ class SphericalHarmonics:
         #             sgn.fftconvolve(ambi_signal.T, sh_hrir.time[1, :, :], mode='full', axes=-1)]
 
         # Sum over channels -> single‑channel binaural signals
-        sum_conv = np.real(np.fft.ifft(fft_sum))
+        sum_conv = np.fft.ifft(fft_sum).real
 
         # do gain staging
         sum_conv *= self.pre_gain * gain
