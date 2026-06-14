@@ -99,13 +99,6 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _validate_ambix_format(self):
-        """Validate that the loaded file is a valid AmbiX (ACN/SN3D) file.
-
-        Checks performed:
-        1. File format is WAV (AmbiX files are WAV containers)
-        2. Channel count follows the (n+1)^2 pattern for Ambisonics
-        3. WAV format tag is appropriate for multi-channel audio (>2 channels)
-        """
 
         # Check 1: Must be a WAV file
         file_format = self.file.format
