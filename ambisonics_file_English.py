@@ -268,7 +268,8 @@ class AmbisonicsFile:
 
         # Apply SN3D → N3D normalization if requested
         if self.normalization == "N3D":
-            audio_data = audio_data * self._n3d_scales[np.newaxis, :]
+            num_acn = len(self._n3d_scales)
+            audio_data[:, :num_acn] *= self._n3d_scales[np.newaxis, :]
 
         return audio_data
 
