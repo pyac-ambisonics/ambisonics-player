@@ -23,15 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class AmbisonicsFile:
-    """
-    Memory-efficient Ambisonics audio loader.
 
-    Features:
-    - TRUE chunked streaming
-    - Low memory usage
-    - float32 processing
-    - pyfar compatibility
-    """
 
     WAVE_FORMAT_EXTENSIBLE = 0xFFFE
 
@@ -102,14 +94,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _validate_ambix_format(self):
-        """Validate that the loaded file is a valid AmbiX (ACN/SN3D) file.
 
-        Checks performed:
-        1. File container is WAV
-        2. Channel count >= (n+1)^2 for some valid order n
-        3. WAV format tag == 0xFFFE (WAVE_FORMAT_EXTENSIBLE) for >1 channel
-           — required by the ambiX spec; the key difference from regular WAV.
-        """
 
         # Check 1: Must be a WAV file
         if self.file.format != 'WAV':
@@ -409,11 +394,7 @@ class AmbisonicsFile:
 
     @staticmethod
     def _normalize_chunk_size(chunk_size: int) -> int:
-        """Round chunk_size up to the nearest power of two, clamped to [32, 8192].
 
-        Small chunks → lower latency for real-time playback (VR head-tracking etc.)
-        Must be a power of two for FFT and audio processing compatibility.
-        """
         # Clamp to valid range
         chunk_size = max(32, min(8192, chunk_size))
 
