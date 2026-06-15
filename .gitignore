@@ -4,7 +4,6 @@ __pycache__/
 Ambisonics_Noise_3rd_order_noise_dir.wav
 TODO.md
 .vscode/settings.json
-HRTF.py
 FABIAN_HRIR_measured_HATO_0.sofa
 __pycache__/HRTF.cpython-314.pyc
 benchmarks.py
@@ -16,5 +15,8 @@ written_binaural_fast_oa.wav
 written_binaural_oa.wav
 written_binaural_oa.wav
 written_binaural_fast_oa.wav
+Ambisonics_Noise_3rd_order_binaural.wav
 tmp
+written_binaural_ls.wav
+**/.vscode/
 .venv
