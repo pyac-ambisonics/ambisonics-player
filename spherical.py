@@ -3,7 +3,6 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-from scipy import signal as sgn
 from hrtf import HRTF, Processing
 
 class SphericalHarmonics:
@@ -163,7 +162,6 @@ class SphericalHarmonics:
         self.update_hrirs_fft(self.pad_to_length)
         #self.hrirs_nm = self.rotation.apply(self.hrirs_nm_base)
 
-    
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
         """

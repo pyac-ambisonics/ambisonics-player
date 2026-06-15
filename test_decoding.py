@@ -4,7 +4,7 @@ from ambisonics_file_English import AmbisonicsFile
 import pyfar as pf
 import numpy as np
 import time
-import shroom as ps
+import warnings
 
 def main():
     """
@@ -85,6 +85,7 @@ def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.)
     This function updates HRIR FFTs once per block-size and performs convolution
     in the frequency domain for improved speed.
     """
+
 
     # Check channel count by comparing the channel shape
     # we know the channel shape for sh_hrir is (2, channels)
