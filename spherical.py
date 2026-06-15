@@ -4,8 +4,7 @@ import numpy as np
 import pyfar as pf
 import spharpy as sh
 from scipy import signal as sgn
-from HRTF import HRTF
-from HRTF_process import HRTF_process
+from hrtf import HRTF, Processing
 
 class SphericalHarmonics:
     """
@@ -41,6 +40,17 @@ class SphericalHarmonics:
 
     # Constructor
     def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1):
+        """Initialize spherical-harmonic HRTF processing.
+
+        Parameters
+        -----------
+        hrtf : HRTF or None, optional
+            Preloaded HRTF instance. If None, a default dataset is loaded.
+        sampling_rate : int or float, optional
+            Target sampling rate in Hz for HRIR resampling. Default is 48000.
+        ambi_order : int, optional
+            Ambisonic order used for the spherical-harmonic decomposition.
+        """
         # # set the hrtf. this should be a pyfar signal!
         # self.hrtf = hrtf
 
@@ -78,15 +88,14 @@ class SphericalHarmonics:
                                                                          )
 
         # create hrtf processing unit
-        process = HRTF_process()
+        self.process = Processing()
 
         # create h_nm matrix 
-        print("applying preprocessing to hrtf to get hrirs_nm")
-        hrirs_nm = process.apply_preprocessing(self.hrtf.hrirs, 
+        hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
-                                               algorithm='LS'
+                                               algorithm='MagLS'
                                                )
-        print("convert to spherical harmonic signal")
+        print("Convert to Spherical Harmonic Signal")
         self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
                                                                    hrirs_nm.time, 
                                                                    hrirs_nm.sampling_rate
@@ -114,13 +123,23 @@ class SphericalHarmonics:
         self.pre_gain = self.find_gain()
 
     def get_IR_length(self):
+        """
+        Return the impulse-response length (number of samples) of the current HRIRs.
+
+        Returns
+        -----------
+        int
+            Number of samples in the HRIR time-domain representation.
+        """
         *_, n_samples = self.hrirs_nm.shape
         return n_samples
     
     # set the current rotation angle
     def set_rotation(self, angles):
         """
-        Set the current spherical-harmonic rotation from Euler angles.
+        Set the current spherical-harmonic rotation from Euler angles and update internal state.
+        Updates the internal rotation matrix, applies the rotation to the base SH coefficients and
+        refreshes any FFT buffers used for fast convolution.
 
         Parameters
         ----------
@@ -159,8 +178,15 @@ class SphericalHarmonics:
 
         Returns
         -------
-        stereo : pyfar.Signal
-            Stereo binaural signal (2 x n_samples) after convolution and gain staging.
+        numpy.ndarray
+            Stereo time-domain array with shape (2, n_samples) containing left and right channels.
+
+        Raises
+        -----------
+        AttributeError
+            If gain is outside [0., 1.].
+        ValueError
+            If Ambisonic channel count mismatches the HRTF channels.
         """
 
         if gain > 1. or gain < 0:
@@ -225,19 +251,25 @@ class SphericalHarmonics:
     # apply the hrtf data to an ambisonics file
     def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024, gain=1.):
         """
-        Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
+        Convolve an ambisonic signal with the rotated HRTFs in teh frequency domain to produce a stereo signal.
 
         Parameters
         ----------
         ambi_signal : np.ndarray
-            Ambisonic input signal (should have shape (n_samples, n_channels)).
+            Input block or stream (should have shape (n_samples, n_channels)).
+        block_size : int, optional
+            FFT size / processing block length. Default 1024.
         gain : float, optional
             A float between 0. and 1., applied after internal gain-staging, Default is 1.
 
         Returns
         -------
-        stereo : np.ndarray
-            Stereo binaural signal (2 x n_samples) after convolution and gain staging.
+        numpy.ndarray
+            Stereo time-domain array (2 x n_samples) after convolution and gain staging.
+
+        Notes
+        -------------
+        Assumes self.hrirs_nm_fft has been prepared via update_hrirs_fft(block_size).
         """
     
         # checking of channel count should be done elsewhere
@@ -278,6 +310,14 @@ class SphericalHarmonics:
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
     # with ambisonics audio
     def update_hrirs_fft(self, block_size: int):
+        """
+        Compute and store FFTs of the spherical-harmonic HRIRs zero-padded to block_size.
+        
+        Parameters
+        ----------------
+        block_size : int
+            FFT length used for convolution; HRIRs are zero-padded to this length.
+        """
         self.pad_to_length = block_size
         self.hrirs_nm_fft = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
     
@@ -286,11 +326,11 @@ class SphericalHarmonics:
         """
         Compute a pre-gain factor for ambisonic-to-binaural rendering.
 
-        The method uses a simple empirical estimate (base ~4 dB) and scales it
-        with the square root of the number of ambisonic channels to account for
-        incoherent summation. The returned value is a linear gain (not dB)
-        that can be multiplied with the rendered stereo signals before clipping
-        checks and any user gain is applied.
+        The method uses a simple empirical estimate (base ~4 dB, dependant on 
+        HRTF Preprocessing Algorithm) and scales it with the square root of the 
+        number of ambisonic channels to account forincoherent summation. The 
+        returned value is a linear gain (not dB) that can be multiplied with the 
+        rendered stereo signals before clipping checks and any user gain is applied.
 
         Returns
         -------
@@ -304,6 +344,10 @@ class SphericalHarmonics:
         # for each doubling of summed channels, this number is also doubled
         estimate = 4
 
+        # estimate is then adjusted, depending on the HRTF preprocessing algorithm used
+        i = self.process.get_gain()
+        estimate *= i
+
         # by taking the square-root of the ambisonics order
         # we get the doubling-factor to apply to our estimate
         estimate *= np.sqrt(self.order_to_channel_n())
@@ -314,15 +358,20 @@ class SphericalHarmonics:
     def test_clipping(self, channels):
         """
         Check provided channels for clipping and print a warning if detected.
+        The function checks whether any
+        sample reaches or exceeds the amplitude threshold of 1.0 and
+        prints a warning message if clipping is found. This function has
+        no return value and only produces a console side-effect.
 
         Parameters
         ----------
         channels : sequence of array_like
             Iterable of 1-D arrays containing time-domain samples for each
-            channel (e.g., left and right). The function checks whether any
-            sample reaches or exceeds the amplitude threshold of 1.0 and
-            prints a warning message if clipping is found. This function has
-            no return value and only produces a console side-effect.
+            channel (e.g., left and right). 
+
+        Notes
+        ----------------
+        This function only prints a warning and does not modify data.
         """
 
         for channel in channels:
