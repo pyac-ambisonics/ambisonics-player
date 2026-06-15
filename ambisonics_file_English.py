@@ -32,13 +32,32 @@ class AmbisonicsFile:
     - pyfar compatibility
     """
 
+    _SUPPORTED_FORMATS = ("ambix", "fuma")
+    _SUPPORTED_NORMALIZATIONS = ("SN3D", "N3D")
+
     def __init__(
         self,
         filepath: str,
         chunk_size: int = 2048,
         order: Optional[int] = None,
         trim_extra_channels: bool = True,
+        format: str = "ambix",
+        normalization: str = "SN3D",
     ):
+
+        if format not in self._SUPPORTED_FORMATS:
+            raise ValueError(
+                f"Unsupported format '{format}'. "
+                f"Supported: {', '.join(self._SUPPORTED_FORMATS)}."
+            )
+        self.format = format
+
+        if normalization not in self._SUPPORTED_NORMALIZATIONS:
+            raise ValueError(
+                f"Unsupported normalization '{normalization}'. "
+                f"Supported: {', '.join(self._SUPPORTED_NORMALIZATIONS)}."
+            )
+        self.normalization = normalization
 
         self.filepath = filepath
         self.chunk_size = self._normalize_chunk_size(chunk_size)
@@ -72,6 +91,12 @@ class AmbisonicsFile:
             self.order = ambix_channels_to_order(self.num_channels)
 
         # ==========================================================
+        # Normalization (SN3D → N3D conversion scales)
+        # ==========================================================
+
+        self._n3d_scales = self._build_normalization_scales()
+
+        # ==========================================================
         # Stream state
         # ==========================================================
 
@@ -99,38 +124,54 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _validate_ambix_format(self):
+        """Validate that the loaded file is a valid Ambisonics audio file.
+
+        Checks performed:
+        1. File container is WAV
+        2. Channel count >= (n+1)^2 for some valid order n
+
+        The format (ambix ACN/SN3D vs FuMa WXY/Furse-Malham) is set by the
+        user via the ``format`` parameter — it cannot be auto-detected.
+        """
 
         # Check 1: Must be a WAV file
-        file_format = self.file.format
-        if file_format != 'WAV':
+        if self.file.format != 'WAV':
             raise ValueError(
-                f"Expected WAV format for AmbiX, got '{file_format}'. "
-                f"Only AmbiX (ACN/SN3D) files in WAV containers are supported."
+                f"Expected WAV container for Ambisonics, got '{self.file.format}'. "
+                f"Ambisonics files (ambix / FuMa) use WAV containers."
             )
 
-        # Check 2: Channel count must follow (n+1)^2 for some integer n >= 0
+        # Check 2: Channel count must be >= (n+1)^2 for some valid order n.
+        # Extra trailing channels (e.g., spot mics) are trimmed later by
+        # _setup_channel_layout — this check only ensures the file has enough
+        # channels to cover at least one valid Ambisonics order.
         num_channels = self.num_channels
         order_candidate = int(np.sqrt(num_channels)) - 1
+        if order_candidate < 0:
+            order_candidate = 0
 
-        if num_channels < 1 or (order_candidate + 1) ** 2 != num_channels:
+        if (order_candidate + 1) ** 2 > num_channels:
             raise ValueError(
-                f"File has {num_channels} channels, which does not match any "
-                f"Ambisonics order. Expected (n+1)^2 channels (e.g., 1, 4, 9, "
-                f"16, 25, 36, 49, 64). "
-                f"This file may not be a valid AmbiX format file."
+                f"File has {num_channels} channels, which is fewer than the "
+                f"minimum 1 channel required for Ambisonics (order 0). "
+                f"This file is not a valid Ambisonics format file."
             )
 
-        # Check 3: For multi-channel audio, verify format tag
-        if num_channels > 2:
-            subtype = self.file.subtype
-            logger.debug(
-                "WAV format: %s, subtype: %s, channels: %d",
-                file_format, subtype, num_channels
+        # Warm the user when channel count is not an exact (n+1)^2 match.
+        # E.g., a regular 2ch stereo WAV would reach here as "order 0 + 1 extra".
+        expected = (order_candidate + 1) ** 2
+        if num_channels != expected:
+            logger.warning(
+                "Channel count %d is not an exact (n+1)^2 value (nearest: %d). "
+                "Extra channels will be trimmed if trim_extra_channels=True. "
+                "If this is a regular multi-channel WAV (not Ambisonics), decoding "
+                "results will be incorrect.",
+                num_channels, expected,
             )
 
         logger.info(
-            "AmbiX format validated: order %d candidate, %d channels",
-            order_candidate, num_channels
+            "Ambisonics format validated: %s, %d channels, nearest order %d",
+            self.format, num_channels, order_candidate,
         )
 
     # ==============================================================
@@ -176,13 +217,23 @@ class AmbisonicsFile:
         num_samples: Optional[int] = None
     ) -> np.ndarray:
 
+        if self.file is None:
+            raise RuntimeError("Cannot read frames: file is closed.")
+
         if num_samples is None:
             num_samples = self.chunk_size
 
-        start_sample = max(
-            0,
-            min(start_sample, self.total_frames)
-        )
+        if start_sample < 0:
+            logger.warning(
+                "Negative start_sample %d clamped to 0", start_sample
+            )
+            start_sample = 0
+        elif start_sample > self.total_frames:
+            logger.warning(
+                "start_sample %d exceeds total_frames %d, clamped",
+                start_sample, self.total_frames,
+            )
+            start_sample = self.total_frames
 
         self.file.seek(start_sample)
 
@@ -214,6 +265,11 @@ class AmbisonicsFile:
                 )
 
                 self._channel_warning_printed = True
+
+        # Apply SN3D → N3D normalization if requested
+        if self.normalization == "N3D":
+            num_acn = len(self._n3d_scales)
+            audio_data[:, :num_acn] *= self._n3d_scales[np.newaxis, :]
 
         return audio_data
 
@@ -273,10 +329,17 @@ class AmbisonicsFile:
 
     def seek_to_position(self, position_samples: int):
 
-        self._current_position = max(
-            0,
-            min(position_samples, self.total_frames - 1)
-        )
+        if position_samples < 0:
+            logger.warning("Negative position %d clamped to 0", position_samples)
+            position_samples = 0
+        elif position_samples > self.total_frames:
+            logger.warning(
+                "Position %d exceeds total_frames %d, clamped",
+                position_samples, self.total_frames,
+            )
+            position_samples = self.total_frames
+
+        self._current_position = position_samples
 
     def seek_to_time(self, time_seconds: float):
 
@@ -310,6 +373,10 @@ class AmbisonicsFile:
     def get_order(self) -> int:
         return self.order
 
+    def get_format(self) -> str:
+        """Return the Ambisonics format: 'ambix' (ACN/SN3D) or 'fuma' (WXY/Furse-Malham)."""
+        return self.format
+
     def get_num_channels(self) -> int:
 
         if self._valid_channels is not None:
@@ -322,6 +389,24 @@ class AmbisonicsFile:
 
     def get_chunk_size(self) -> int:
         return self.chunk_size
+
+    def get_normalization(self) -> str:
+        """Return the normalization scheme: 'SN3D' or 'N3D'."""
+        return self.normalization
+
+    def _build_normalization_scales(self) -> np.ndarray:
+        """Build scale factors for SN3D → N3D conversion.
+
+        For ACN channel c, order n = floor(sqrt(c)), scale = sqrt(2n + 1).
+        Returns an array of 1.0 if normalization is SN3D (no conversion needed).
+        """
+        num_acn = (self.order + 1) ** 2
+        scales = np.ones(num_acn, dtype=np.float32)
+        if self.normalization == "N3D":
+            for c in range(num_acn):
+                n = int(np.sqrt(c))
+                scales[c] = np.sqrt(2 * n + 1)
+        return scales
 
     @staticmethod
     def _normalize_chunk_size(chunk_size: int) -> int:
@@ -381,9 +466,9 @@ class AmbisonicsFile:
     def _print_load_info(self):
         effective_channels = self.get_num_channels()
         logger.info(
-            "Loaded: %s | Order: %d | Channels: %d -> %d | "
+            "Loaded: %s | Format: %s | Norm: %s | Order: %d | Channels: %d -> %d | "
             "Duration: %.2fs | SR: %d | Frames: %d | Chunk: %d",
-            self.filepath, self.order, self.num_channels,
+            self.filepath, self.format, self.normalization, self.order, self.num_channels,
             effective_channels, self.duration, self.samplerate,
             self.total_frames, self.chunk_size
         )
@@ -396,6 +481,7 @@ class AmbisonicsFile:
 
         if self.file:
             self.file.close()
+            self.file = None
 
     def __enter__(self):
         return self
@@ -405,7 +491,7 @@ class AmbisonicsFile:
 
     def __repr__(self):
         return (
-            f"AmbisonicsFile(order={self.order}, "
+            f"AmbisonicsFile(format={self.format}, norm={self.normalization}, order={self.order}, "
             f"channels={self.get_num_channels()}, "
             f"duration={self.duration:.2f}s, "
             f"sr={self.samplerate})"
