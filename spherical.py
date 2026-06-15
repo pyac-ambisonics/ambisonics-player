@@ -88,7 +88,6 @@ class SphericalHarmonics:
 
         # create hrtf processing unit
         self.process = Processing()
-
         # create h_nm matrix 
         hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
@@ -277,25 +276,15 @@ class SphericalHarmonics:
         # decide: rotate ambisonics signal, or rotate SH data. don't rotate both!
         #rotated_signal = self.rotation_matrix @ ambi_signal
 
-        # sh_hrir should have the shape (2, ambi_channels, n bins)
-        #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
-
         # make fft of our ambi signal. shape (n_samples, n_channels)
         fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
 
         # convolve by multiplication in time domain over all channels, for each ear
         n_samples, *_ = fft_ambi.shape
-        #fft_conv = np.ndarray((2, chan_count, n_samples), dtype=np.float32)
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
-            #for chan in range(chan_count):
-                # cult in freq domain is convolution in time
-            #fft_conv[ear, chan] = fft_ambi[:, chan] * fft_sh[ear, chan, :]
             fft_sum[ear] = np.sum(fft_ambi.T * self.hrirs_nm_fft[ear, :, :], axis=0)
-        
-        # fft_conv = [sgn.fftconvolve(ambi_signal.T, sh_hrir.time[0, :, :], mode='full', axes=-1),
-        #             sgn.fftconvolve(ambi_signal.T, sh_hrir.time[1, :, :], mode='full', axes=-1)]
 
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real

@@ -4,7 +4,6 @@ from ambisonics_file_English import AmbisonicsFile
 import pyfar as pf
 import numpy as np
 import time
-import warnings
 
 def main():
     """
