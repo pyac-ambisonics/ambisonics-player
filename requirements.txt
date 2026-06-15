@@ -1,0 +1,4 @@
+python-osc
+pyfar
+spharpy
+shroom
