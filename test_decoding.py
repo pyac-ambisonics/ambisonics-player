@@ -29,10 +29,13 @@ def main():
     print("Creating Spherical Harmonics")
     start = time.time()
     harmonics = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi_file.get_samplerate(), ambi_order=ambi_order)
-    print(f"{harmonics.ambi_order=}")
-    print(f"{harmonics.hrirs_nm.shape=}")
     print(f"Creating SH took {time.time() - start:.4f} seconds\n")
 
+    print(f"{hrtf.hrirs_linear.time.shape=}")
+    print(f"{ambi_order=}")
+    print(f"{ambi_file.get_num_channels()=}")
+    print(f"{harmonics.ambi_order=}")
+    print(f"{harmonics.hrirs_nm.shape=}\n")
 
     # print("Apply HRTF pyfar")
     # start = time.time()
