@@ -144,7 +144,7 @@ class SphericalHarmonics:
         angles : sequence of float
             Euler angles in degrees as (alpha, beta, gamma).
         """
-        self.rotation_matrix =sh.transforms.wigner_d_rotation(self.ambi_order, *angles)
+        self.rotation_matrix = sh.transforms.wigner_d_rotation(self.ambi_order, *angles)
         self.rotation_matrix = self.rotation_matrix.astype(np.float32)
 
         # rotation only works in N3D normalization
@@ -274,7 +274,7 @@ class SphericalHarmonics:
 
         # apply rotation to the sh_hrir
         # decide: rotate ambisonics signal, or rotate SH data. don't rotate both!
-        #rotated_signal = self.rotation_matrix @ ambi_signal
+        # self.set_rotation([0,0,0])
 
         # make fft of our ambi signal. shape (n_samples, n_channels)
         fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)

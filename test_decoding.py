@@ -22,7 +22,7 @@ def main():
     print("Load HRTFs")
     start = time.time()
     hrtf = HRTF("FABIAN_HRIR_measured_HATO_0.sofa")
-    #hrtf.load_hp_filter("Audio-technica ATH M50x")
+    hrtf.load_hp_filter("Audio-technica ATH M50x")
     print(f"Loading HRTF took {time.time() - start:.4f} seconds\n")
 
     print("Creating Spherical Harmonics")
