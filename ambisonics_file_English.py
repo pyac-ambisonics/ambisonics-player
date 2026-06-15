@@ -22,9 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 class AmbisonicsFile:
+    """
+    Memory-efficient Ambisonics audio loader.
 
+    Features:
+    - TRUE chunked streaming
+    - Low memory usage
+    - float32 processing
+    - pyfar compatibility
+    """
 
     _SUPPORTED_FORMATS = ("ambix", "fuma")
+    _SUPPORTED_NORMALIZATIONS = ("SN3D", "N3D")
 
     def __init__(
         self,
@@ -33,6 +42,7 @@ class AmbisonicsFile:
         order: Optional[int] = None,
         trim_extra_channels: bool = True,
         format: str = "ambix",
+        normalization: str = "SN3D",
     ):
 
         if format not in self._SUPPORTED_FORMATS:
@@ -41,6 +51,13 @@ class AmbisonicsFile:
                 f"Supported: {', '.join(self._SUPPORTED_FORMATS)}."
             )
         self.format = format
+
+        if normalization not in self._SUPPORTED_NORMALIZATIONS:
+            raise ValueError(
+                f"Unsupported normalization '{normalization}'. "
+                f"Supported: {', '.join(self._SUPPORTED_NORMALIZATIONS)}."
+            )
+        self.normalization = normalization
 
         self.filepath = filepath
         self.chunk_size = self._normalize_chunk_size(chunk_size)
@@ -74,6 +91,12 @@ class AmbisonicsFile:
             self.order = ambix_channels_to_order(self.num_channels)
 
         # ==========================================================
+        # Normalization (SN3D → N3D conversion scales)
+        # ==========================================================
+
+        self._n3d_scales = self._build_normalization_scales()
+
+        # ==========================================================
         # Stream state
         # ==========================================================
 
@@ -101,7 +124,15 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _validate_ambix_format(self):
+        """Validate that the loaded file is a valid Ambisonics audio file.
 
+        Checks performed:
+        1. File container is WAV
+        2. Channel count >= (n+1)^2 for some valid order n
+
+        The format (ambix ACN/SN3D vs FuMa WXY/Furse-Malham) is set by the
+        user via the ``format`` parameter — it cannot be auto-detected.
+        """
 
         # Check 1: Must be a WAV file
         if self.file.format != 'WAV':
@@ -235,6 +266,10 @@ class AmbisonicsFile:
 
                 self._channel_warning_printed = True
 
+        # Apply SN3D → N3D normalization if requested
+        if self.normalization == "N3D":
+            audio_data = audio_data * self._n3d_scales[np.newaxis, :]
+
         return audio_data
 
     # ==============================================================
@@ -354,13 +389,27 @@ class AmbisonicsFile:
     def get_chunk_size(self) -> int:
         return self.chunk_size
 
+    def get_normalization(self) -> str:
+        """Return the normalization scheme: 'SN3D' or 'N3D'."""
+        return self.normalization
+
+    def _build_normalization_scales(self) -> np.ndarray:
+        """Build scale factors for SN3D → N3D conversion.
+
+        For ACN channel c, order n = floor(sqrt(c)), scale = sqrt(2n + 1).
+        Returns an array of 1.0 if normalization is SN3D (no conversion needed).
+        """
+        num_acn = (self.order + 1) ** 2
+        scales = np.ones(num_acn, dtype=np.float32)
+        if self.normalization == "N3D":
+            for c in range(num_acn):
+                n = int(np.sqrt(c))
+                scales[c] = np.sqrt(2 * n + 1)
+        return scales
+
     @staticmethod
     def _normalize_chunk_size(chunk_size: int) -> int:
-        """Round chunk_size up to the nearest power of two, clamped to [32, 8192].
 
-        Small chunks → lower latency for real-time playback (VR head-tracking etc.)
-        Must be a power of two for FFT and audio processing compatibility.
-        """
         # Clamp to valid range
         chunk_size = max(32, min(8192, chunk_size))
 
@@ -416,9 +465,9 @@ class AmbisonicsFile:
     def _print_load_info(self):
         effective_channels = self.get_num_channels()
         logger.info(
-            "Loaded: %s | Format: %s | Order: %d | Channels: %d -> %d | "
+            "Loaded: %s | Format: %s | Norm: %s | Order: %d | Channels: %d -> %d | "
             "Duration: %.2fs | SR: %d | Frames: %d | Chunk: %d",
-            self.filepath, self.format, self.order, self.num_channels,
+            self.filepath, self.format, self.normalization, self.order, self.num_channels,
             effective_channels, self.duration, self.samplerate,
             self.total_frames, self.chunk_size
         )
@@ -441,7 +490,7 @@ class AmbisonicsFile:
 
     def __repr__(self):
         return (
-            f"AmbisonicsFile(format={self.format}, order={self.order}, "
+            f"AmbisonicsFile(format={self.format}, norm={self.normalization}, order={self.order}, "
             f"channels={self.get_num_channels()}, "
             f"duration={self.duration:.2f}s, "
             f"sr={self.samplerate})"
