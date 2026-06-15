@@ -11,7 +11,6 @@ Supports automatic empty channel detection and real-time chunked reading.
 """
 
 import logging
-import struct
 import numpy as np
 import pyfar as pf
 import soundfile as sf
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 class AmbisonicsFile:
 
 
-    WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+    _SUPPORTED_FORMATS = ("ambix", "fuma")
 
     def __init__(
         self,
@@ -33,7 +32,15 @@ class AmbisonicsFile:
         chunk_size: int = 2048,
         order: Optional[int] = None,
         trim_extra_channels: bool = True,
+        format: str = "ambix",
     ):
+
+        if format not in self._SUPPORTED_FORMATS:
+            raise ValueError(
+                f"Unsupported format '{format}'. "
+                f"Supported: {', '.join(self._SUPPORTED_FORMATS)}."
+            )
+        self.format = format
 
         self.filepath = filepath
         self.chunk_size = self._normalize_chunk_size(chunk_size)
@@ -99,8 +106,8 @@ class AmbisonicsFile:
         # Check 1: Must be a WAV file
         if self.file.format != 'WAV':
             raise ValueError(
-                f"Expected WAV format for ambiX, got '{self.file.format}'. "
-                f"ambiX (ACN/SN3D) files use WAV containers."
+                f"Expected WAV container for Ambisonics, got '{self.file.format}'. "
+                f"Ambisonics files (ambix / FuMa) use WAV containers."
             )
 
         # Check 2: Channel count must be >= (n+1)^2 for some valid order n.
@@ -116,7 +123,7 @@ class AmbisonicsFile:
             raise ValueError(
                 f"File has {num_channels} channels, which is fewer than the "
                 f"minimum 1 channel required for Ambisonics (order 0). "
-                f"This file is not a valid ambiX format file."
+                f"This file is not a valid Ambisonics format file."
             )
 
         # Warm the user when channel count is not an exact (n+1)^2 match.
@@ -126,64 +133,15 @@ class AmbisonicsFile:
             logger.warning(
                 "Channel count %d is not an exact (n+1)^2 value (nearest: %d). "
                 "Extra channels will be trimmed if trim_extra_channels=True. "
-                "If this is a regular multi-channel WAV (not ambiX), decoding "
+                "If this is a regular multi-channel WAV (not Ambisonics), decoding "
                 "results will be incorrect.",
                 num_channels, expected,
             )
 
-        # Check 3: ambiX spec requires WAVE_FORMAT_EXTENSIBLE (0xFFFE).
-        # In practice, many tools write ambisonics as plain PCM WAV.
-        # We warn but still accept PCM files with valid channel counts.
-        if num_channels > 1:
-            format_tag = self._read_wav_format_tag()
-            if format_tag == self.WAVE_FORMAT_EXTENSIBLE:
-                logger.debug("WAVE_FORMAT_EXTENSIBLE confirmed")
-            else:
-                logger.warning(
-                    "Format tag is 0x%04X (PCM), not 0xFFFE (WAVE_FORMAT_EXTENSIBLE). "
-                    "This file may not strictly conform to the ambiX spec, "
-                    "but will be loaded assuming ACN/SN3D channel ordering.",
-                    format_tag,
-                )
-
         logger.info(
-            "ambiX (ACN/SN3D) validated: %d channels, nearest order %d",
-            num_channels, order_candidate,
+            "Ambisonics format validated: %s, %d channels, nearest order %d",
+            self.format, num_channels, order_candidate,
         )
-
-    def _read_wav_format_tag(self) -> int:
-        """Read the WAV format tag from the raw file header.
-
-        Scans for the 'fmt ' chunk and returns the audio_format field
-        (first 2 bytes of the chunk data). Returns 0x0001 (PCM) on failure.
-        """
-        try:
-            with open(self.filepath, 'rb') as fh:
-                # Skip RIFF header: "RIFF"(4) + file_size(4) + "WAVE"(4)
-                fh.seek(12)
-
-                # Scan for "fmt " chunk (safety limit: 256 chunks)
-                for _ in range(256):
-                    chunk_id = fh.read(4)
-                    if len(chunk_id) < 4:
-                        break
-                    chunk_size = struct.unpack('<I', fh.read(4))[0]
-
-                    if chunk_id == b'fmt ':
-                        # First 2 bytes of fmt data = audio_format (format tag)
-                        fmt_byte = fh.read(2)
-                        if len(fmt_byte) >= 2:
-                            return struct.unpack('<H', fmt_byte)[0]
-                        break
-
-                    # Guard against zero-size chunks (corrupted file)
-                    if chunk_size == 0:
-                        break
-                    fh.seek(chunk_size, 1)
-        except Exception:
-            logger.debug("Could not read raw WAV format tag", exc_info=True)
-
-        return 0x0001  # fallback: assume PCM, let other checks fail if needed
 
     # ==============================================================
     # Channel setup
@@ -379,6 +337,10 @@ class AmbisonicsFile:
     def get_order(self) -> int:
         return self.order
 
+    def get_format(self) -> str:
+        """Return the Ambisonics format: 'ambix' (ACN/SN3D) or 'fuma' (WXY/Furse-Malham)."""
+        return self.format
+
     def get_num_channels(self) -> int:
 
         if self._valid_channels is not None:
@@ -394,7 +356,11 @@ class AmbisonicsFile:
 
     @staticmethod
     def _normalize_chunk_size(chunk_size: int) -> int:
+        """Round chunk_size up to the nearest power of two, clamped to [32, 8192].
 
+        Small chunks → lower latency for real-time playback (VR head-tracking etc.)
+        Must be a power of two for FFT and audio processing compatibility.
+        """
         # Clamp to valid range
         chunk_size = max(32, min(8192, chunk_size))
 
@@ -450,9 +416,9 @@ class AmbisonicsFile:
     def _print_load_info(self):
         effective_channels = self.get_num_channels()
         logger.info(
-            "Loaded: %s | Order: %d | Channels: %d -> %d | "
+            "Loaded: %s | Format: %s | Order: %d | Channels: %d -> %d | "
             "Duration: %.2fs | SR: %d | Frames: %d | Chunk: %d",
-            self.filepath, self.order, self.num_channels,
+            self.filepath, self.format, self.order, self.num_channels,
             effective_channels, self.duration, self.samplerate,
             self.total_frames, self.chunk_size
         )
@@ -475,7 +441,7 @@ class AmbisonicsFile:
 
     def __repr__(self):
         return (
-            f"AmbisonicsFile(order={self.order}, "
+            f"AmbisonicsFile(format={self.format}, order={self.order}, "
             f"channels={self.get_num_channels()}, "
             f"duration={self.duration:.2f}s, "
             f"sr={self.samplerate})"
