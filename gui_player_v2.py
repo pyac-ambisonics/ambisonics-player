@@ -46,6 +46,8 @@ class AudioPlayerGUI:
 
         self.is_dragging_progress = False
 
+        self.block_size = 512
+
         self.setup_style()
         self.create_widgets()
         self.update_gui_loop()
@@ -658,7 +660,5 @@ class AudioPlayerGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.mainloop()
 
-
-if __name__ == "__main__":
-    app = AudioPlayerGUI()
-    app.run()
+    def get_block_size(self):
+        return self.block_size
