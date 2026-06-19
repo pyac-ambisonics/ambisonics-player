@@ -8,7 +8,7 @@ import time
 
 class BinauralPlayer:
 
-    def __init__(self, ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.0, block_size=1024):
+    def __init__(self, ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.0):
         
         # Check channel count by comparing the channel shape
         # we know the channel shape for sh_hrir is (2, channels)
@@ -40,7 +40,7 @@ class BinauralPlayer:
         # overlap add L
         self.sh_length = None
         # overlap add M
-        self.block_size = block_size
+        self.block_size = ambi_file.get_chunk_size()
         # overlap add N
         self.N = None
 
@@ -77,9 +77,11 @@ class BinauralPlayer:
         
         print("Start processing thread.")
 
+        # ensures we only wait a fraction of the time we generally need
+        #put_timeout = (self.block_size / self.fs) * 0.1
+
         # while we are not stopping
         while not self.stop_event.is_set():
-            start = time.time()
             # Pause handling: block if paused but not stopped
             if self.pause_event.is_set():
                 # Block indefinitely until pause_event is cleared (resume or stop)
@@ -88,23 +90,23 @@ class BinauralPlayer:
                 # If stop was triggered, exit the outer loop
                 if self.stop_event.is_set():
                     break
-
+            
             # Read next chunk
             chunk, end_of_file = self.ambi_file.get_next_chunk()
             if chunk is None:
                 break
-
+            
             # processes one chunk and return a stereo block, 
             # updating the overlap buffer internally.
             processed_block = self._process_chunk(chunk)
 
             # Put into queue
             try:
-                self.audio_queue.put(processed_block, timeout=0.1)
+                self.audio_queue.put(processed_block, timeout=1)
             except queue.Full:
                 # If queue is full, skip this block (or handle gracefully)
-                pass
-            
+                print("Warning!!! Queue is full! Dropping this block")
+
             # at end of file add the overlap buffer a final time
             if end_of_file:
                 # add the remaining overlapp buffer to the queue
@@ -118,8 +120,6 @@ class BinauralPlayer:
                     # queue None-item as flag that playback has ended
                     self.audio_queue.put(None)
                     break
-            print(f"processing one block took {time.time() - start:.4f} s.\n"
-                  + f"Expected time:{self.block_size / self.fs:.4f}")
 
     # process a signle chunk of data, performing an overlap-add algorithm
     def _process_chunk(self, chunk):
@@ -128,18 +128,22 @@ class BinauralPlayer:
         This method should maintain self.overlap_buffer and update it.
         For now, we simulate with random data – replace with your actual processing.
         """
+        
+        # TAKES AROUND 0.0008 seconds to run or faster
+        
         # update our block size
         # using self.blocksize instead. but this may lead to problem? check
-        # block_size, *_ = chunk.shape
+        block_size, *_ = chunk.shape
 
         # apply hrtf
-        stereo = self.sh.apply_hrtf_fast(chunk, self.N, self.gain)
+        stereo = self.sh.apply_hrtf_fast(chunk, self.N)
         # add overlap to stereo output
         stereo[:self.sh_length-1] += self.overlap_buffer
         # save new overlap buffer
-        self.overlap_buffer = stereo[self.block_size:self.block_size + self.sh_length - 1]
+        self.overlap_buffer[:] = stereo[block_size:block_size + self.sh_length - 1]
+
     
-        return stereo
+        return stereo[:block_size]
     
     def _audio_callback_robust(self, outdata, frames, time, status):
         """sounddevice callback – outputs from queue or silence if paused."""

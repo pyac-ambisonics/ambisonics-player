@@ -115,6 +115,7 @@ def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.)
 
     # core loop to process each chunk
     while True:
+        start = time.time()
         chunk, end_of_file = ambi_file.get_next_chunk()
 
         # update our block size
@@ -124,7 +125,7 @@ def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.)
             break
 
         # apply hrtf
-        stereo = sh.apply_hrtf_fast(chunk, N, gain)
+        stereo = sh.apply_hrtf_fast(chunk, N, gain).T
         # add overlap to stereo output
         stereo[:,:sh_length-1] += overlap_buffer
         # add stereo to output buffer
@@ -139,6 +140,8 @@ def overlap_add_fast(ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.)
             # write the last overlap_buffer to our output
             output_buffer[:, pos:pos + sh_length - 1] = overlap_buffer
             break
+        print(f"processing one block took {time.time() - start:.4f} s.\n"
+                + f"Expected time:{block_size / 48_000:.4f}")
 
 
     # create final pyfar signal

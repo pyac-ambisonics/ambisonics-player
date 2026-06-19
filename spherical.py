@@ -249,7 +249,7 @@ class SphericalHarmonics:
         return stereo_time
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024, gain=1.):
+    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024):
         """
         Convolve an ambisonic signal with the rotated HRTFs in teh frequency domain to produce a stereo signal.
 
@@ -298,7 +298,7 @@ class SphericalHarmonics:
         sum_conv = np.fft.ifft(fft_sum).real
 
         # do gain staging
-        sum_conv *= self.pre_gain * gain
+        sum_conv *= self.pre_gain
         # no test for clipping because of time
         # transpose, since sounddevice expects shape (n_samples, n_channels)
         return sum_conv.T

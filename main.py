@@ -57,20 +57,20 @@ def main():
 
     print("Start binaural player")
     start = time.time()
-    player = BinauralPlayer(ambi_file=ambi_file, sh=harmonics, gain=0.5, block_size=block_size)
+    player = BinauralPlayer(ambi_file=ambi_file, sh=harmonics, gain=0.5)
     player.play()
 
     # After a while, pause
-    time.sleep(3)
+    time.sleep(12)
     player.pause()
     time.sleep(1)
     player.resume()
 
     time.sleep(3)
     # Seek to 8 seconds
-    player.seek_to_time(12)
+    player.seek_to_time(60)
 
-    time.sleep(3)
+    time.sleep(12)
 
     # Stop
     player.stop()
