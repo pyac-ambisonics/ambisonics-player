@@ -197,8 +197,7 @@ class BinauralPlayer:
 
         # write output to outdata
         outdata[:] = out * self.gain
-
-            
+         
     def _audio_callback(self, outdata, frames, time, status):
         """sounddevice callback – outputs from queue or silence if paused."""
 
@@ -240,7 +239,7 @@ class BinauralPlayer:
     def play(self):
         """Start playback from current position."""
         print("Start playback.")
-        # clean up old strema before next playback
+        # clean up old stream before next playback
         if self.stream is not None:
             self.stop()
 
@@ -378,8 +377,6 @@ class BinauralPlayer:
             except queue.Empty:
                 break
 
-        # reset the stop flag
-        self.pause_event.clear()
 
     def set_volume(self, volume: float):
         """
@@ -397,6 +394,12 @@ class BinauralPlayer:
 
         self.loop = bool(enabled)
         print(f"Loop set to {self.loop}")
+
+    def get_duration(self):
+        return self.ambi_file.get_duration()
+    
+    def get_current_time(self):
+        return self.ambi_file.get_current_time()
 
         
     def next_power_of_two(self, n: int) -> int:

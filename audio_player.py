@@ -1,5 +1,9 @@
 import numpy as np
 import sounddevice as sd
+import queue
+import threading
+from ambisonics_file_English import AmbisonicsFile
+from spherical import SphericalHarmonics
 import soundfile as sf
 
 
@@ -20,18 +24,148 @@ class AudioPlayer:
     - loop playback
     """
 
-    def __init__(self):
-        self.audio = None
-        self.sample_rate = None
-        self.volume = 1.0
+    def __init__(self, ambi_file: AmbisonicsFile, sh: SphericalHarmonics, gain=1.0):
         self.position = 0
         self.is_loaded = False
         self.source_name = None
+        
+        # Check channel count by comparing the channel shape
+        # we know the channel shape for sh_hrir is (2, channels)
+        _, sh_hrir_ch, _ = sh.hrirs_nm.shape
+        if ambi_file.get_num_channels() != sh_hrir_ch:
+            raise ValueError("Channel counts must match (e.g. 16 for 3rd order).")
+        
+        if gain > 1. or gain < 0:
+            raise AttributeError("The gain must be in range [0., 1.].")
+        
+        # spherical processing of ambisonics file instances
+        self.ambi_file = ambi_file
+        self.sh = sh
+        # some important internal variables
+        self.gain = gain
+        self.fs = ambi_file.get_samplerate()
+        # binarual is always stereo
+        self.n_channels = 2
 
-        self.stream = None
-        self.is_playing = False
-        self.is_paused = False
+        self.audio_queue = queue.Queue(maxsize=10)
+
+        # some control flags for handling playing, stopping and pausing
+        self.play_event = threading.Event()
+        self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
         self.loop = False
+
+        # States for overlap-add (must be reset on seek)
+        self.overlap_buffer = None 
+        # overlap add L
+        self.sh_length = None
+        # overlap add M
+        self.block_size = ambi_file.get_chunk_size()
+        # overlap add N
+        self.N = None
+
+        # keeping track of blocks
+        self.current_block = None
+        self.current_block_pos = 0
+
+        # Thread and stream objects
+        self.processing_thread = None
+        self.stream = None
+
+
+    # reset all variables in case of seek or stop
+    def _reset_process_variables(self):
+        # Reset the file reader to beginning
+        #self.ambi_file.reset_position()
+
+        # reset internal state 
+        # current impulse response length M
+        self.sh_length = self.sh.get_IR_length()
+        # block size L
+        self.block_size = self.ambi_file.get_chunk_size()
+
+        # compute N >= M + L - 1
+        self.N = self.next_power_of_two(self.sh_length + self.block_size - 1)
+
+        # update our sh fft coefficients once (and on each rotation update)
+        self.sh.update_hrirs_fft(self.N)
+
+        # allocate buffers
+        self.overlap_buffer = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
+
+    def _process_loop(self):
+        """Processing thread: reads chunks, processes, and puts into queue."""
+        
+        print("Start processing thread.")
+
+        # ensures we only wait a fraction of the time we generally need
+        #put_timeout = (self.block_size / self.fs) * 0.1
+
+        # while we are not stopping
+        while not self.stop_event.is_set():
+            # Pause handling: block if paused but not stopped
+            if self.pause_event.is_set():
+                # Block indefinitely until play_event is set (resume or stop)
+                self.play_event.wait()
+            
+                # If stop was triggered, exit the outer loop
+                if self.stop_event.is_set():
+                    break
+            
+            # Read next chunk
+            chunk, end_of_file = self.ambi_file.get_next_chunk()
+            if chunk is None:
+                break
+            
+            # processes one chunk and return a stereo block, 
+            # updating the overlap buffer internally.
+            processed_block = self._process_chunk(chunk)
+
+            # Put into queue
+            try:
+                self.audio_queue.put(processed_block, timeout=1)
+            except queue.Full:
+                # If queue is full, skip this block (or handle gracefully)
+                print("Warning!!! Queue is full! Dropping this block")
+
+            # at end of file add the overlap buffer a final time
+            if end_of_file:
+                # add the remaining overlapp buffer to the queue
+                self.audio_queue.put(self.overlap_buffer.copy())
+
+                #check for looping
+                if self.loop:
+                    # resets processor and will read chunk 0 next
+                    self._reset_process_variables()
+                    self.ambi_file.reset_position()
+                else:
+                    # queue None-item as flag that playback has ended
+                    self.audio_queue.put(None)
+                    break
+
+    # process a single chunk of data, performing an overlap-add algorithm
+    def _process_chunk(self, chunk):
+        """
+        Process a single Ambisonics chunk with overlap-add.
+        This method should maintain self.overlap_buffer and update it.
+        For now, we simulate with random data – replace with your actual processing.
+        """
+        
+        # TAKES AROUND 0.0008 seconds to run or faster
+        
+        # update our block size
+        # using self.blocksize instead. but this may lead to problem? check
+        block_size, *_ = chunk.shape
+
+        # apply hrtf
+        stereo = self.sh.apply_hrtf_fast(chunk, self.N)
+        # add overlap to stereo output
+        stereo[:self.sh_length-1] += self.overlap_buffer
+        # save new overlap buffer
+        self.overlap_buffer[:] = stereo[block_size:block_size + self.sh_length - 1]
+
+    
+        return stereo[:block_size]
 
     def load_audio(self, audio, sample_rate, source_name="Audio array"):
         """
@@ -69,7 +203,7 @@ class AudioPlayer:
         self.stop()
 
         self.audio = audio
-        self.sample_rate = int(sample_rate)
+        self.fs = int(sample_rate)
         self.position = 0
         self.is_loaded = True
         self.source_name = source_name
@@ -98,50 +232,58 @@ class AudioPlayer:
         sample_rate = signal.sampling_rate
         self.load_audio(audio, sample_rate, source_name="pyfar.Signal")
 
-    def audio_callback(self, outdata, frames, time, status):
-        """
-        This function is repeatedly called by sounddevice.
-        It sends small audio blocks to the output device.
-        """
+    def _audio_callback_robust(self, outdata, frames, time, status):
+        """sounddevice callback – outputs from queue or silence if paused."""
 
+        # debug if something went wrong last callback
         if status:
-            print(status)
+            print(f"Audio callback status: {status}")
 
-        if self.audio is None or self.is_paused:
-            outdata[:] = np.zeros((frames, 2), dtype="float32")
+        # check pasue status
+        if self.pause_event.is_set():
+            # fill with silence if paused
+            outdata.fill(0)
             return
+        
+        # prepare output buffer for this callback
+        out = np.zeros((frames, self.n_channels), dtype=np.float32)
+        need = frames
+        write_pos = 0
 
-        end_position = self.position + frames
+        while need > 0:
+            # if no curent block is availabel or it hasn't been fully consumed yet, process a new block
+            if self.current_block is None or self.current_block_pos >= len(self.current_block):
+                try:
+                    data = self.audio_queue.get_nowait()
+                except queue.Empty:
+                     # Underflow: not enough processed audio ready: output 0's
+                     outdata[:] = out * self.gain
+                     return
+                
+                # we set data = None in our _process_loop() if we reached the end of file to signal playback has ended
+                if data is None:
+                    # End of file
+                    outdata.fill(0)
+                    # tell sounddevice to cleanup and stop the callback
+                    raise sd.CallbackStop
+                
+                # ensure shape (n_samples, n_channels) and correct dtype
+                self.current_block = np.asarray(data, dtype=np.float32)
+                self.current_block_pos = 0
 
-        if end_position <= len(self.audio):
-            block = self.audio[self.position:end_position]
-            self.position = end_position
+            # write the current block to output
+            # get sample counts for writing
+            available = len(self.current_block) - self.current_block_pos
+            take = min(available, need)
+            
+            # copy current block to output buffer
+            out[write_pos:write_pos + take] = self.current_block[self.current_block_pos:self.current_block_pos + take]
+            self.current_block_pos += take
+            write_pos += take
+            need -= take
 
-        else:
-            remaining = self.audio[self.position:]
-
-            if self.loop:
-                missing = frames - len(remaining)
-
-                # If missing is larger than the full audio length, repeat safely
-                if missing > len(self.audio):
-                    repeats = int(np.ceil(missing / len(self.audio))) + 1
-                    loop_source = np.tile(self.audio, (repeats, 1))
-                    loop_part = loop_source[:missing]
-                else:
-                    loop_part = self.audio[:missing]
-
-                block = np.vstack((remaining, loop_part))
-                self.position = missing % len(self.audio)
-
-            else:
-                block = np.zeros((frames, 2), dtype="float32")
-                block[:len(remaining)] = remaining
-                self.position = len(self.audio)
-                self.is_playing = False
-                raise sd.CallbackStop
-
-        outdata[:] = block * self.volume
+        # write output to outdata
+        outdata[:] = out * self.gain
 
     def play(self):
         """
@@ -153,12 +295,12 @@ class AudioPlayer:
             return
 
         # If currently paused, resume
-        if self.is_paused:
+        if self.pause_event.is_set():
             self.resume()
             return
 
         # If already playing, do nothing
-        if self.stream is not None and self.is_playing:
+        if self.stream is not None and self.play_event.is_set():
             print("Already playing.")
             return
 
@@ -166,31 +308,51 @@ class AudioPlayer:
         if self.stream is not None:
             self.stop(reset_position=False)
 
+        # reset stop and pause flags
+        self.stop_event.clear()
+        self.pause_event.clear()
+
+        # reset all processing variables before starting the processing thread. 
+        # also ensures block size is calculated before we initialize the stream
+        self._reset_process_variables()
+
+        # Start processing thread
+        self.processing_thread = threading.Thread(target=self._process_loop)
+        self.processing_thread.start()
+
         self.stream = sd.OutputStream(
-            samplerate=self.sample_rate,
-            channels=2,
+            samplerate=self.fs,
+            channels=self.n_channels,
             dtype="float32",
-            callback=self.audio_callback,
-            blocksize=1024
+            callback=self._audio_callback_robust,
+            # let sounddevice choose blocksize
+            # blocksize=self.N,
+            finished_callback=self._on_stream_finished
         )
 
-        self.is_playing = True
-        self.is_paused = False
+        # set palying flag to true
+        self.play_event.set()
 
-        print(f"Playing from {self.position / self.sample_rate:.2f} seconds...")
+        print(f"Playing from {self.position / self.fs:.2f} seconds...")
         self.stream.start()
+
+    def _on_stream_finished(self):
+        """Called when stream stops (e.g., at end of file)."""
+        print("Stream finished.")
+        # set the stop flag
+        self.stop_event.set()
 
     def pause(self):
         """
         Pause playback and keep current position.
         """
 
-        if not self.is_playing:
+        if not self.play_event.is_set():
             return
 
-        self.is_paused = True
-        self.is_playing = False
-        print(f"Paused at {self.position / self.sample_rate:.2f} seconds.")
+        self.pause_event.set()
+        self.play_event.clear()
+        print(f"Paused at {self.position / self.fs:.2f} seconds.")
 
     def resume(self):
         """
@@ -200,13 +362,13 @@ class AudioPlayer:
         if not self.is_loaded:
             return
 
-        self.is_paused = False
+        self.pause_event.clear()
 
         if self.stream is None:
             self.play()
         else:
-            self.is_playing = True
-            print(f"Resumed at {self.position / self.sample_rate:.2f} seconds.")
+            self.play_event.set()
+            print(f"Resumed at {self.position / self.fs:.2f} seconds.")
 
     def stop(self, reset_position=True):
         """
@@ -218,17 +380,39 @@ class AudioPlayer:
             If True, reset playback position to the beginning.
         """
 
+        # set the stop flag
+        self.stop_event.set()
+        # clear the pause flag, just in case it was blocking our processing thread
+        self.pause_event.clear()
+        # set the play flag to true, to wake the waiting processing thread
+        self.play_event.set()
+
+        # clean up the stream
         if self.stream is not None:
             self.stream.stop()
             self.stream.close()
             self.stream = None
 
-        self.is_playing = False
-        self.is_paused = False
+        # terminate the processing_thread
+        if self.processing_thread is not None:
+            self.processing_thread.join(timeout=1.0)
+
+            # debug message if processing_thread didn't terminate properly
+            if self.processing_thread.is_alive():
+                print("Warning: Processing thread did not terminate cleanly.")
+
+        # Clear queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
 
         if reset_position:
-            self.position = 0
+            self.ambi_file.reset_position()
 
+        # clear the play event at the end
+        self.play_event.clear()
         print("Playback stopped.")
 
     def set_volume(self, volume: float):
@@ -236,8 +420,8 @@ class AudioPlayer:
         Set playback volume between 0.0 and 1.0.
         """
 
-        self.volume = max(0.0, min(float(volume), 1.0))
-        print(f"Volume set to {self.volume:.2f}")
+        self.gain = max(0.0, min(float(volume), 1.0))
+        print(f"Volume set to {self.gain:.2f}")
 
     def set_start_offset(self, seconds: float):
         """
@@ -248,16 +432,37 @@ class AudioPlayer:
             print("No audio loaded.")
             return
 
-        if seconds < 0:
-            seconds = 0
-
         duration = self.get_duration()
 
         if seconds >= duration:
             print(f"Offset is too large. Audio duration is only {duration:.2f} seconds.")
             return
 
-        self.position = int(seconds * self.sample_rate)
+        # Stop current playback and processing
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        self.stop_event.set()
+        if self.processing_thread is not None:
+            self.processing_thread.join(timeout=1.0)
+
+        # Reset processor state (overlap buffer, etc.)
+        self._reset_process_variables()
+
+        # Reset the file reader to the new position
+        self.ambi_file.seek_to_time(seconds)
+
+        # Clear the audio queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        # Restart playback
+        self.play()
+
         print(f"Start offset set to {seconds:.2f} seconds.")
 
     def seek_to(self, seconds: float):
@@ -269,16 +474,31 @@ class AudioPlayer:
         if not self.is_loaded:
             print("No audio loaded.")
             return
+        
+        # Stop current playback and processing
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        self.stop_event.set()
+        if self.processing_thread is not None:
+            self.processing_thread.join(timeout=1.0)
 
-        duration = self.get_duration()
+        # Reset processor state (overlap buffer, etc.)
+        self._reset_process_variables()
 
-        if seconds < 0:
-            seconds = 0
+        # Reset the file reader to the new position
+        self.ambi_file.seek_to_time(seconds)
 
-        if seconds > duration:
-            seconds = duration
+        # Clear the audio queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
 
-        self.position = int(seconds * self.sample_rate)
+        # Restart playback
+        self.play()
         print(f"Seeked to {seconds:.2f} seconds.")
 
     def set_loop(self, enabled: bool):
@@ -297,7 +517,7 @@ class AudioPlayer:
         if not self.is_loaded:
             return 0.0
 
-        return len(self.audio) / self.sample_rate
+        return self.ambi_file.get_duration()
 
     def get_current_time(self):
         """
@@ -307,7 +527,7 @@ class AudioPlayer:
         if not self.is_loaded:
             return 0.0
 
-        return self.position / self.sample_rate
+        return self.ambi_file.get_current_time()
 
     def get_info_text(self):
         """
@@ -319,11 +539,11 @@ class AudioPlayer:
 
         return (
             f"Source: {self.source_name}\n"
-            f"Sample rate: {self.sample_rate} Hz\n"
-            f"Channels: {self.audio.shape[1]}\n"
+            f"Sample rate: {self.fs} Hz\n"
+            f"Channels: {self.ambi_file.get_num_channels()}\n"
             f"Duration: {self.get_duration():.2f} seconds\n"
             f"Current time: {self.get_current_time():.2f} seconds\n"
-            f"Current volume: {self.volume:.2f}\n"
+            f"Current volume: {self.gain:.2f}\n"
             f"Loop: {self.loop}"
         )
 
@@ -333,3 +553,23 @@ class AudioPlayer:
         """
 
         print(self.get_info_text())
+
+    def set_loaded(self, loaded: bool):
+        self.is_loaded = loaded
+        
+    def next_power_of_two(self, n: int) -> int:
+        """
+        Return the smallest power of two greater than or equal to n.
+
+        Parameters
+        --------------
+        n : int
+            Input integer (n >= 1).
+
+        Returns
+        ------------
+        int
+            Smallest power of two >= n.
+        """
+        # make use of bitshifts to quickly calculate the enxt power of two
+        return 1 << (n - 1).bit_length()
