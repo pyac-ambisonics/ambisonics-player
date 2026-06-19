@@ -4,6 +4,7 @@ import sounddevice as sd
 import numpy as np
 from spherical import SphericalHarmonics
 from ambisonics_file_English import AmbisonicsFile
+import time
 
 class BinauralPlayer:
 
@@ -43,6 +44,10 @@ class BinauralPlayer:
         # overlap add N
         self.N = None
 
+        # keeping track of blocks
+        self.current_block = None
+        self.current_block_pos = 0
+
         # Thread and stream objects
         self.processing_thread = None
         self.stream = None
@@ -74,6 +79,7 @@ class BinauralPlayer:
 
         # while we are not stopping
         while not self.stop_event.is_set():
+            start = time.time()
             # Pause handling: block if paused but not stopped
             if self.pause_event.is_set():
                 # Block indefinitely until pause_event is cleared (resume or stop)
@@ -112,6 +118,8 @@ class BinauralPlayer:
                     # queue None-item as flag that playback has ended
                     self.audio_queue.put(None)
                     break
+            print(f"processing one block took {time.time() - start:.4f} s.\n"
+                  + f"Expected time:{self.block_size / self.fs:.4f}")
 
     # process a signle chunk of data, performing an overlap-add algorithm
     def _process_chunk(self, chunk):
@@ -132,7 +140,61 @@ class BinauralPlayer:
         self.overlap_buffer = stereo[self.block_size:self.block_size + self.sh_length - 1]
     
         return stereo
+    
+    def _audio_callback_robust(self, outdata, frames, time, status):
+        """sounddevice callback – outputs from queue or silence if paused."""
 
+        # debug if something went wrong last callback
+        if status:
+            print(f"Audio callback status: {status}")
+
+        # check pasue status
+        if self.pause_event.is_set():
+            # fill with silence if paused
+            outdata.fill(0)
+            return
+        
+        # prepare output buffer for this callback
+        out = np.zeros((frames, self.n_channels), dtype=np.float32)
+        need = frames
+        write_pos = 0
+
+        while need > 0:
+            # if no curent block is availabel or it hasn't been fully consumed yet, process a new block
+            if self.current_block is None or self.current_block_pos >= len(self.current_block):
+                try:
+                    data = self.audio_queue.get_nowait()
+                except queue.Empty:
+                     # Underflow: not enough processed audio ready: output 0's
+                     outdata[:] = out * self.gain
+                     return
+                
+                # we set data = None in our _process_loop() if we reached the end of file to signal playback has ended
+                if data is None:
+                    # End of file
+                    outdata.fill(0)
+                    # tell sounddevice to cleanup and stop the callback
+                    raise sd.CallbackStop
+                
+                # ensure shape (n_samples, n_channels) and correct dtype
+                self.current_block = np.asarray(data, dtype=np.float32)
+                self.current_block_pos = 0
+
+            # write the current block to output
+            # get sample counts for writing
+            available = len(self.current_block) - self.current_block_pos
+            take = min(available, need)
+            
+            # copy current block to output buffer
+            out[write_pos:write_pos + take] = self.current_block[self.current_block_pos:self.current_block_pos + take]
+            self.current_block_pos += take
+            write_pos += take
+            need -= take
+
+        # write output to outdata
+        outdata[:] = out * self.gain
+
+            
     def _audio_callback(self, outdata, frames, time, status):
         """sounddevice callback – outputs from queue or silence if paused."""
 
@@ -157,6 +219,7 @@ class BinauralPlayer:
         # we set data = None in our _process_loop() if we reached the end of file to signal playback has ended
         if data is None:
             # End of file
+            print("Filling with 0")
             outdata.fill(0)
             # tell sounddevice to cleanup and stop the callback
             raise sd.CallbackStop
@@ -193,9 +256,10 @@ class BinauralPlayer:
         self.stream = sd.OutputStream(
             samplerate=self.fs,
             channels=self.n_channels,
-            callback=self._audio_callback,
+            callback=self._audio_callback_robust,
             # N, not blocksize! since blocksize gets convoluted, it gets bigger!
-            blocksize=self.N,
+            # let sounddevice choose blocksize
+            # blocksize=self.N,
             finished_callback=self._on_stream_finished
         )
         self.stream.start()

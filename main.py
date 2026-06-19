@@ -1,15 +1,8 @@
-from audio_player import AudioPlayer
 from gui_player_v2 import AudioPlayerGUI
 from hrtf import HRTF
 from spherical import SphericalHarmonics
 from ambisonics_file_English import AmbisonicsFile
 from player import BinauralPlayer
-import pyfar as pf
-import numpy as np
-import shroom as ps
-import threading
-from pathlib import Path
-import os
 import time
 
 def main():
