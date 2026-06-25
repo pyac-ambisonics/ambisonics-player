@@ -249,7 +249,7 @@ class SphericalHarmonics:
         return stereo_time
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024, gain=1.):
+    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024):
         """
         Convolve an ambisonic signal with the rotated HRTFs in teh frequency domain to produce a stereo signal.
 
@@ -287,25 +287,21 @@ class SphericalHarmonics:
 
         # convolve by multiplication in time domain over all channels, for each ear
         n_samples, *_ = fft_ambi.shape
-        #fft_conv = np.ndarray((2, chan_count, n_samples), dtype=np.float32)
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
-            #for chan in range(chan_count):
-                # cult in freq domain is convolution in time
-            #fft_conv[ear, chan] = fft_ambi[:, chan] * fft_sh[ear, chan, :]
+            # perform convolution in frequency domain and sum in frequency domain
             fft_sum[ear] = np.sum(fft_ambi.T * self.hrirs_nm_fft[ear, :, :], axis=0)
         
-        # fft_conv = [sgn.fftconvolve(ambi_signal.T, sh_hrir.time[0, :, :], mode='full', axes=-1),
-        #             sgn.fftconvolve(ambi_signal.T, sh_hrir.time[1, :, :], mode='full', axes=-1)]
 
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
 
         # do gain staging
-        sum_conv *= self.pre_gain * gain
+        sum_conv *= self.pre_gain
         # no test for clipping because of time
-        return sum_conv
+        # transpose, since sounddevice expects shape (n_samples, n_channels)
+        return sum_conv.T
     
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
     # with ambisonics audio

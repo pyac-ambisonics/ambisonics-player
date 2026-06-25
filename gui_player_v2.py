@@ -2,6 +2,12 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import ttk
+import threading
+from queue import Queue
+from spherical import SphericalHarmonics
+from ambisonics_file_English import AmbisonicsFile
+from audio_player import AudioPlayer
+from hrtf import HRTF
 
 from audio_player import AudioPlayer
 
@@ -24,7 +30,7 @@ class AudioPlayerGUI:
     """
 
     def __init__(self):
-        self.player = AudioPlayer()
+        self.player = None
 
         self.root = tk.Tk()
         self.root.title("Ambisonics Player - GUI Prototype")
@@ -46,9 +52,15 @@ class AudioPlayerGUI:
 
         self.is_dragging_progress = False
 
+        self.block_size = 512
+
+        self._backend_load_queue = Queue()
+        self.root.after(100, self._process_backend_load_queue)
+
         self.setup_style()
         self.create_widgets()
         self.update_gui_loop()
+        self.set_controls_enabled(False)
 
     # ==============================================================
     # Styling
@@ -155,7 +167,7 @@ class AudioPlayerGUI:
         ambix_button = ttk.Button(
             input_card,
             text="Load AmbiX File",
-            command=self.load_ambix_placeholder,
+            command=self.load_ambix,
             style="Accent.TButton"
         )
         ambix_button.grid(row=0, column=2, padx=(20, 0), sticky="e")
@@ -398,7 +410,7 @@ class AudioPlayerGUI:
     # Loading functions
     # ==============================================================
 
-    def load_ambix_placeholder(self):
+    def load_ambix(self):
         """
         Placeholder for the final project input.
 
@@ -420,6 +432,7 @@ class AudioPlayerGUI:
         if not file_path:
             return
 
+        # UI feedback
         file_name = os.path.basename(file_path)
         self.selected_file.set(f"AmbiX file selected: {file_name}")
         self.input_type.set("Input type: AmbiX / multichannel WAV")
@@ -430,15 +443,87 @@ class AudioPlayerGUI:
 
         self.set_controls_enabled(False)
 
-        self.write_info_text(
-            "AmbiX file selected, but full decoding is not connected in the GUI yet.\n\n"
-            f"Selected file:\n{file_path}\n\n"
-            "Intended final pipeline:\n"
-            "AmbiX file -> Ambisonics loader -> HRTF / SphericalHarmonics decoder "
-            "-> binaural pyfar.Signal -> AudioPlayer.\n\n"
-            "For the current integration test, run test_integration_decoder_gui.py. "
-            "That script sends a decoder output directly to this GUI as a pyfar.Signal."
-        )
+        # read GUI state on main thread
+        requested_block_size = self.get_block_size()
+        requested_gain = float(self.volume_value.get())
+
+        # a worker thread that handles the heavy processing and audio playback
+        def worker(path, block_size, gain):
+            try:
+                # load the ambisonics file
+                ambix = AmbisonicsFile(path, chunk_size=block_size)
+                if not ambix.is_valid():
+                    raise ValueError("Selected file is not a valid AmbiX file for its channel count.")
+                
+                # load the hrtf
+                hrtf = HRTF("FABIAN_HRIR_measured_HATO_0.sofa")
+
+                # create SH using the file's order and samplerate
+                sh = SphericalHarmonics(hrtf=hrtf,
+                                        sampling_rate=ambix.get_samplerate(),
+                                        ambi_order=ambix.get_order())
+                # create binaural streaming player
+                binaural = AudioPlayer(ambi_file=ambix, sh=sh, gain=gain)
+
+                # put success result for main threa to consume
+                self._backend_load_queue.put(("success", binaural, path))
+
+            except Exception as e:
+                # put error for main thread to consume
+                self._backend_load_queue.put(("error", str(e), file_path))
+
+        # start the thread
+        threading.Thread(target=worker, 
+                         args=(file_path, requested_block_size, requested_gain), 
+                         daemon=True).start()
+
+    # threadsafe handling of starting the audio player
+    def _process_backend_load_queue(self):
+        try:
+            while not self._backend_load_queue.empty():
+                typ, payload, path = self._backend_load_queue.get_nowait()
+
+                # on success
+                if typ == "success":
+                    binaural = payload
+                    try:
+                        self.player = binaural
+                    except Exception as e:
+                        # something went wrong
+                        print("Something went wrong assigning the player")
+                        print(e)
+
+                    # set loaded status in player
+                    self.player.set_loaded(True)
+
+                    # get info
+                    file_name = os.path.basename(path)
+                    self.selected_file.set(f"AmbiX: {file_name}")
+                    self.input_type.set("Input type: AmbiX / multichannel WAV")
+                    self.output_type.set("Output: binaural streaming")
+                    self.pipeline_status.set("Pipeline: AmbiX -> Decoder -> Streaming player")
+
+                    # print info
+                    print(f"Successfully loaded Ambix file {path}")
+
+                    # update gui
+                    self.reset_progress_display()
+                    self.set_controls_enabled(True)
+                    self.update_info()
+                else:
+                    # something went wrong!
+                    err = payload
+                    messagebox.showerror("Load error", err)
+                    self.pipeline_status.set("Pipeline: load failed")
+                    self.set_controls_enabled(False)
+                    self.update_info()
+                    print("Something went wrong loading the file")
+        except Exception as e:
+            # something went wrong
+            print("Something went wrong in the wokrer thread:")
+            print(e)
+        finally:
+            self.root.after(100, self._process_backend_load_queue)
 
     def load_binaural_wav_file(self):
         """
@@ -470,6 +555,7 @@ class AudioPlayerGUI:
             self.update_info()
 
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def load_pyfar_signal_to_gui(self, signal, name="Decoder output"):
@@ -493,6 +579,7 @@ class AudioPlayerGUI:
             self.update_info()
 
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     # ==============================================================
@@ -504,6 +591,7 @@ class AudioPlayerGUI:
             self.player.play()
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def pause(self):
@@ -511,6 +599,7 @@ class AudioPlayerGUI:
             self.player.pause()
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def stop(self):
@@ -519,6 +608,7 @@ class AudioPlayerGUI:
             self.progress_value.set(0.0)
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def set_volume(self, value):
@@ -528,6 +618,7 @@ class AudioPlayerGUI:
             self.volume_display.configure(text=f"{volume:.2f}")
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def set_offset(self):
@@ -537,8 +628,10 @@ class AudioPlayerGUI:
             self.progress_value.set(self.player.get_current_time())
             self.update_info()
         except ValueError:
+            print(error)
             messagebox.showerror("Error", "Please enter a valid number for offset.")
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     def set_loop(self):
@@ -546,6 +639,7 @@ class AudioPlayerGUI:
             self.player.set_loop(self.loop_value.get())
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
 
     # ==============================================================
@@ -575,6 +669,7 @@ class AudioPlayerGUI:
             self.player.seek_to(seconds)
             self.update_info()
         except Exception as error:
+            print(error)
             messagebox.showerror("Error", str(error))
         finally:
             self.is_dragging_progress = False
@@ -624,19 +719,19 @@ class AudioPlayerGUI:
         Update GUI regularly.
         This keeps current time and progress bar in sync during playback.
         """
+        if not self.player is None:
+            if self.player.is_loaded:
+                current_time = self.player.get_current_time()
+                duration = self.player.get_duration()
 
-        if self.player.is_loaded:
-            current_time = self.player.get_current_time()
-            duration = self.player.get_duration()
+                self.time_text.set(
+                    f"{self.format_time(current_time)} / {self.format_time(duration)}"
+                )
 
-            self.time_text.set(
-                f"{self.format_time(current_time)} / {self.format_time(duration)}"
-            )
+                if not self.is_dragging_progress:
+                    self.progress_value.set(current_time)
 
-            if not self.is_dragging_progress:
-                self.progress_value.set(current_time)
-
-            self.update_info()
+                self.update_info()
 
         self.root.after(250, self.update_gui_loop)
 
@@ -658,7 +753,5 @@ class AudioPlayerGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.mainloop()
 
-
-if __name__ == "__main__":
-    app = AudioPlayerGUI()
-    app.run()
+    def get_block_size(self):
+        return self.block_size
