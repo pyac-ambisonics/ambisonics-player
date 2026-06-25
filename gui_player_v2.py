@@ -472,19 +472,10 @@ class AudioPlayerGUI:
                 # put error for main thread to consume
                 self._backend_load_queue.put(("error", str(e), file_path))
 
+        # start the thread
         threading.Thread(target=worker, 
                          args=(file_path, requested_block_size, requested_gain), 
                          daemon=True).start()
-
-        # self.write_info_text(
-        #     "AmbiX file selected, but full decoding is not connected in the GUI yet.\n\n"
-        #     f"Selected file:\n{file_path}\n\n"
-        #     "Intended final pipeline:\n"
-        #     "AmbiX file -> Ambisonics loader -> HRTF / SphericalHarmonics decoder "
-        #     "-> binaural pyfar.Signal -> AudioPlayer.\n\n"
-        #     "For the current integration test, run test_integration_decoder_gui.py. "
-        #     "That script sends a decoder output directly to this GUI as a pyfar.Signal."
-        # )
 
     # threadsafe handling of starting the audio player
     def _process_backend_load_queue(self):
