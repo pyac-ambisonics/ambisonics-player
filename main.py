@@ -2,7 +2,6 @@ from gui_player_v2 import AudioPlayerGUI
 from hrtf import HRTF
 from spherical import SphericalHarmonics
 from ambisonics_file_English import AmbisonicsFile
-from player import BinauralPlayer
 import time
 
 def main():
