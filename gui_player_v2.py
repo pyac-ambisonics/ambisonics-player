@@ -520,7 +520,7 @@ class AudioPlayerGUI:
                     print("Something went wrong loading the file")
         except Exception as e:
             # something went wrong
-            print("Something went wrong in the wokrer thread:")
+            print("Something went wrong in the worker thread:")
             print(e)
         finally:
             self.root.after(100, self._process_backend_load_queue)
@@ -746,7 +746,8 @@ class AudioPlayerGUI:
     # ==============================================================
 
     def on_close(self):
-        self.player.stop()
+        if self.player is not None:
+            self.player.stop()
         self.root.destroy()
 
     def run(self):

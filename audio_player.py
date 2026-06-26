@@ -5,6 +5,7 @@ import threading
 from ambisonics_file_English import AmbisonicsFile
 from spherical import SphericalHarmonics
 import soundfile as sf
+from utils import next_power_of_two
 
 
 class AudioPlayer:
@@ -31,7 +32,7 @@ class AudioPlayer:
         
         # Check channel count by comparing the channel shape
         # we know the channel shape for sh_hrir is (2, channels)
-        _, sh_hrir_ch, _ = sh.hrirs_nm.shape
+        _, sh_hrir_ch, _ = sh.hrir_nm.shape
         if ambi_file.get_num_channels() != sh_hrir_ch:
             raise ValueError("Channel counts must match (e.g. 16 for 3rd order).")
         
@@ -85,7 +86,7 @@ class AudioPlayer:
         self.block_size = self.ambi_file.get_chunk_size()
 
         # compute N >= M + L - 1
-        self.N = self.next_power_of_two(self.sh_length + self.block_size - 1)
+        self.N = next_power_of_two(self.sh_length + self.block_size - 1)
 
         # update our sh fft coefficients once (and on each rotation update)
         self.sh.update_hrirs_fft(self.N)
@@ -372,7 +373,7 @@ class AudioPlayer:
 
     def stop(self, reset_position=True):
         """
-        Stop playback.
+        Stop playback. Clears the stream and the processing thread. Call this before exiting the program.
 
         Parameters
         ----------
@@ -556,20 +557,3 @@ class AudioPlayer:
 
     def set_loaded(self, loaded: bool):
         self.is_loaded = loaded
-        
-    def next_power_of_two(self, n: int) -> int:
-        """
-        Return the smallest power of two greater than or equal to n.
-
-        Parameters
-        --------------
-        n : int
-            Input integer (n >= 1).
-
-        Returns
-        ------------
-        int
-            Smallest power of two >= n.
-        """
-        # make use of bitshifts to quickly calculate the enxt power of two
-        return 1 << (n - 1).bit_length()

@@ -5,6 +5,10 @@ import pyfar as pf
 import spharpy as sh
 from scipy import signal as sgn
 from hrtf import HRTF, Processing
+from scipy.spatial.transform import Rotation
+from shroom.utils.rotation_utils import wigner_d_matrix
+import utils
+import time
 
 class SphericalHarmonics:
     """
@@ -90,37 +94,32 @@ class SphericalHarmonics:
         # create hrtf processing unit
         self.process = Processing()
 
+        start = time.time()
         # create h_nm matrix 
         hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
                                                algorithm='MagLS'
                                                )
+        
+        print(f"Doing HRTF preprocessing took {time.time() - start:.2f}s")
         print("Convert to Spherical Harmonic Signal")
-        self.hrirs_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
+        self.hrir_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
                                                                    hrirs_nm.time, 
                                                                    hrirs_nm.sampling_rate
                                                                    ).time
         
-        # make a copy as "base" hrirs_nm
-        self.hrirs_nm_base = self.hrirs_nm.copy()
-        # prepare an N3D object for rotations
-        self.hrirs_nm_base_n3d = sh.spherical.renormalize(self.hrirs_nm_base, 
-                                                          channel_convention='ACN',
-                                                          current_norm='SN3D',
-                                                          target_norm='N3D',
-                                                          axis=1)
-        
-        *_, self.pad_to_length = self.hrirs_nm.shape
+        *_, pad_to_length = self.hrir_nm.shape
 
-        # prepare a rotation matrix, with all angles 0 currently
-        angles = [0, 0, 0]
-        self.set_rotation(angles)
-        # self.rotation = sh.transforms.SphericalHarmonicRotation.from_euler('xyz', np.deg2rad(angles))
-        # # calculate the rotation matrix once
-        # self.rotation_matrix = self.rotation.as_spherical_harmonic_matrix(self.sh_definition)
+        # update this later by calling update_hrirs_fft() once we know the desired fft length
+        self.hrir_nm_fft = np.fft.fft(self.hrir_nm, utils.next_power_of_two(pad_to_length), axis=-1)
+
+        # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
+        self.hrir_nm_rot = None
+        self.D = None
+        self._apply_rotation([0, 0, 0])
 
         # prepare pre_gain for gianstaging
-        self.pre_gain = self.find_gain()
+        self.pre_gain = self._find_gain()
 
     def get_IR_length(self):
         """
@@ -131,38 +130,65 @@ class SphericalHarmonics:
         int
             Number of samples in the HRIR time-domain representation.
         """
-        *_, n_samples = self.hrirs_nm.shape
+        *_, n_samples = self.hrir_nm.shape
         return n_samples
     
-    # set the current rotation angle
     def set_rotation(self, angles):
         """
-        Set the current spherical-harmonic rotation from Euler angles and update internal state.
-        Updates the internal rotation matrix, applies the rotation to the base SH coefficients and
-        refreshes any FFT buffers used for fast convolution.
+        Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx).
 
         Parameters
         ----------
         angles : sequence of float
-            Euler angles in degrees as (alpha, beta, gamma).
+            Euler angles in degrees as (z, y, x).
         """
-        self.rotation_matrix =sh.transforms.wigner_d_rotation(self.ambi_order, *angles)
-        self.rotation_matrix = self.rotation_matrix.astype(np.float32)
+        # get rotation and prepare a copy of our hrirs
+        rotation = Rotation.from_euler("zyx", angles, degrees=True)
 
-        # rotation only works in N3D normalization
-        hrirs_nm_n3d = self.rotation_matrix @ self.hrirs_nm_base_n3d
-        
-        # convert back to SN3D normalization
-        self.hrirs_nm = sh.spherical.renormalize(hrirs_nm_n3d, 
-                                                 channel_convention='ACN',
-                                                 current_norm='N3D',
-                                                 target_norm='SN3D',
-                                                 axis=1)
-        
-        # update the fft
-        self.update_hrirs_fft(self.pad_to_length)
-        #self.hrirs_nm = self.rotation.apply(self.hrirs_nm_base)
+        # based on Yhonatangayer's pyshroom implementation
+        # 1. Get Euler angles (Z-Y-Z convention for Wigner-D)
+        # Note: scipy uses intrinsic rotations by default for 'zyz'
+        alpha, beta, gamma = rotation.as_euler("zyz")
 
+        # 2. Compute Wigner-D matrix
+        self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+
+    # set the current rotation angle
+    def _apply_rotation(self, angles=None):
+        """
+        Applies rotation to to the base SH coefficients in frequency domain. Thus, the already zero-padded
+        signal is used, because that is what the frequency domain data is based on. Updates the internal state
+        of hrir_nm_rot. If angles are given, updates the internal state of the wigner-D matrix D.
+
+        Parameters
+        ----------
+        angles : sequence of float, optional
+            Euler angles in degrees as (z, y, x).
+            If no angles are given, uses the last available internally stored angles.
+            If angles are given, updates the internally stored angles.
+        """
+        # update the wigner D matrix if angles were given
+        if angles is not None:
+            # get rotation and prepare a copy of our hrirs
+            rotation = Rotation.from_euler("zyx", angles, degrees=True)
+
+            # based on Yhonatangayer's pyshroom implementation
+            # 1. Get Euler angles (Z-Y-Z convention for Wigner-D)
+            # Note: scipy uses intrinsic rotations by default for 'zyz'
+            alpha, beta, gamma = rotation.as_euler("zyz")
+
+            # 2. Compute Wigner-D matrix
+            self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+        
+        # using the fft, since we expect this to be faster than time domain
+        hrir_rot = self.hrir_nm_fft.copy()
+
+        # 3. Apply rotation
+        # data is (Channels, SH, Time/Freq)
+        # D is (SH, SH)
+        # We want D @ data
+        # einsum: ij, cjk -> cik
+        self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
@@ -193,7 +219,7 @@ class SphericalHarmonics:
             raise AttributeError("The gain must be in range [0., 1.].")
 
         # apply rotation to the sh_hrir
-        sh_hrir = self.hrirs_nm.copy()
+        sh_hrir = self.hrir_nm.copy()
 
         # Check channel count by comparing the channel shape
         # we know the channel shape for ambi_signal is (channels,)
@@ -251,7 +277,8 @@ class SphericalHarmonics:
     # apply the hrtf data to an ambisonics file
     def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024):
         """
-        Convolve an ambisonic signal with the rotated HRTFs in teh frequency domain to produce a stereo signal.
+        Convolve an ambisonic signal with the rotated HRTFs in the frequency domain to produce a stereo signal.
+        This function expects
 
         Parameters
         ----------
@@ -265,7 +292,7 @@ class SphericalHarmonics:
         Returns
         -------
         numpy.ndarray
-            Stereo time-domain array (2 x n_samples) after convolution and gain staging.
+            Stereo time-domain array (n_samples, 2) after convolution and gain staging.
 
         Notes
         -------------
@@ -276,8 +303,7 @@ class SphericalHarmonics:
         # check for correct gain also elsewhere!
 
         # apply rotation to the sh_hrir
-        # decide: rotate ambisonics signal, or rotate SH data. don't rotate both!
-        #rotated_signal = self.rotation_matrix @ ambi_signal
+        self._apply_rotation()
 
         # sh_hrir should have the shape (2, ambi_channels, n bins)
         #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
@@ -291,9 +317,8 @@ class SphericalHarmonics:
 
         for ear in range(2):
             # perform convolution in frequency domain and sum in frequency domain
-            fft_sum[ear] = np.sum(fft_ambi.T * self.hrirs_nm_fft[ear, :, :], axis=0)
+            fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
         
-
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
 
@@ -314,17 +339,16 @@ class SphericalHarmonics:
         block_size : int
             FFT length used for convolution; HRIRs are zero-padded to this length.
         """
-        self.pad_to_length = block_size
-        self.hrirs_nm_fft = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+        self.hrir_nm_fft = np.fft.fft(self.hrir_nm, n=block_size, axis=-1)
     
     # find a good gain to apply to the stereo signal, based on the ambisonics order
-    def find_gain(self):
+    def _find_gain(self):
         """
         Compute a pre-gain factor for ambisonic-to-binaural rendering.
 
         The method uses a simple empirical estimate (base ~4 dB, dependant on 
         HRTF Preprocessing Algorithm) and scales it with the square root of the 
-        number of ambisonic channels to account forincoherent summation. The 
+        number of ambisonic channels to account for incoherent summation. The 
         returned value is a linear gain (not dB) that can be multiplied with the 
         rendered stereo signals before clipping checks and any user gain is applied.
 
@@ -346,7 +370,7 @@ class SphericalHarmonics:
 
         # by taking the square-root of the ambisonics order
         # we get the doubling-factor to apply to our estimate
-        estimate *= np.sqrt(self.order_to_channel_n())
+        estimate *= np.sqrt(utils.order_to_channel_n(self.ambi_order))
         # B = 1 / 10^(estimate/20)
         return 1 / np.pow(10, estimate * 0.05, dtype=np.float32)
     
@@ -377,19 +401,3 @@ class SphericalHarmonics:
                 "WARNING! WARNING" \
                 "clipping detected!\n" \
                 "####################")
-    
-    # calculates the nummer of channels corresponding to the ambisonics order
-    def order_to_channel_n(self):
-        """
-        Return the number of spherical-harmonic channels for the current order.
-
-        For a given ambisonic order N the number of channels is (N + 1)^2.
-
-        Returns
-        -------
-        int
-            Number of spherical-harmonic/ambisonic channels.
-        """
-
-        return (self.ambi_order + 1)**2
-

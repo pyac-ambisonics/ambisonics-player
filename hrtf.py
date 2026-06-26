@@ -168,7 +168,6 @@ class HRTF:
         self.hrirs = self.hrirs_linear.copy()
     
 # a class making different HRTF preprocessing algorithms available
-
 class Processing:
     
     def __init__(self):
@@ -191,7 +190,7 @@ class Processing:
         # the current algorithm
         self.current_algorithm = 'LS'
         # for each algorithm, a different pre-gain might be necessary.
-        self.__gain = {
+        self._gain = {
             'LS': 1., 
             'MagLS': 1.28, 
             'TA': 1., 
@@ -208,7 +207,7 @@ class Processing:
             Algorithm-specific pre-gain multiplier.
         """
 
-        return self.__gain[self.current_algorithm]
+        return self._gain[self.current_algorithm]
 
     # apply the chosen preprocessing algorithm. use MagLS as default
     def apply_preprocessing(self, hrirs, sh, algorithm='LS'):
@@ -298,7 +297,6 @@ class Processing:
         ------------
         This function performs per-frequency optimization and is computationally heavier than LS.
         """
-
         # make our data frequency data
         hrirs_freq = hrirs.freq_raw.copy()
         # find corresponding frequency bin
@@ -311,7 +309,6 @@ class Processing:
         alpha[stop:] = 1
         start = stop
 
-        
         # make a ramp up if needed. Use Hanning for smoothness
         if ramp > 0:
             # use default ramp of f * (1/sqrt(2))
