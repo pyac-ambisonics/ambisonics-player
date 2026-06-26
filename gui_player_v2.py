@@ -624,7 +624,7 @@ class AudioPlayerGUI:
     def set_offset(self):
         try:
             seconds = float(self.offset_value.get())
-            self.player.set_start_offset(seconds)
+            self.player.seek_to(seconds)
             self.progress_value.set(self.player.get_current_time())
             self.update_info()
         except ValueError:
@@ -667,6 +667,7 @@ class AudioPlayerGUI:
         try:
             seconds = float(self.progress_value.get())
             self.player.seek_to(seconds)
+            self.progress_value.set(self.player.get_current_time())
             self.update_info()
         except Exception as error:
             print(error)
@@ -724,12 +725,13 @@ class AudioPlayerGUI:
                 current_time = self.player.get_current_time()
                 duration = self.player.get_duration()
 
-                self.time_text.set(
-                    f"{self.format_time(current_time)} / {self.format_time(duration)}"
-                )
+                
 
                 if not self.is_dragging_progress:
                     self.progress_value.set(current_time)
+                    self.time_text.set(
+                        f"{self.format_time(current_time)} / {self.format_time(duration)}"
+                    )
 
                 self.update_info()
 

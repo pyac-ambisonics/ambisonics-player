@@ -54,6 +54,8 @@ class AudioPlayer:
         self.play_event = threading.Event()
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
+        self.seek_event = threading.Event()
+        self.seek_target = 0.0
         self.loop = False
 
         # States for overlap-add (must be reset on seek)
@@ -104,6 +106,19 @@ class AudioPlayer:
 
         # while we are not stopping
         while not self.stop_event.is_set():
+
+            # seek handling: update current time and internal state
+            if self.seek_event.is_set():
+                # clear the seek event
+                self.seek_event.clear()
+                self.current_block = None
+                self.current_block_pos = 0
+                self._clear_audio_queue()
+                self.ambi_file.seek_to_time(self.seek_target)
+                self._reset_process_variables()
+                #continue to enxt loop iteration
+                continue
+
             # Pause handling: block if paused but not stopped
             if self.pause_event.is_set():
                 # Block indefinitely until play_event is set (resume or stop)
@@ -112,7 +127,7 @@ class AudioPlayer:
                 # If stop was triggered, exit the outer loop
                 if self.stop_event.is_set():
                     break
-            
+
             # Read next chunk
             chunk, end_of_file = self.ambi_file.get_next_chunk()
             if chunk is None:
@@ -438,33 +453,19 @@ class AudioPlayer:
         if seconds >= duration:
             print(f"Offset is too large. Audio duration is only {duration:.2f} seconds.")
             return
+        
+        # in case we are not already streaming/processing data just update internal state
+        if self.stream is None or self.processing_thread is None:
+            self._reset_process_variables()
+            self.ambi_file.seek_to_time(seconds)
+            self._clear_audio_queue()
+            self.position = int(seconds * self.fs)
+            print(f"Seeked to {seconds:.2f} seconds.")
+            return
 
-        # Stop current playback and processing
-        if self.stream is not None:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-        self.stop_event.set()
-        if self.processing_thread is not None:
-            self.processing_thread.join(timeout=1.0)
-
-        # Reset processor state (overlap buffer, etc.)
-        self._reset_process_variables()
-
-        # Reset the file reader to the new position
-        self.ambi_file.seek_to_time(seconds)
-
-        # Clear the audio queue
-        while not self.audio_queue.empty():
-            try:
-                self.audio_queue.get_nowait()
-            except queue.Empty:
-                break
-
-        # Restart playback
-        self.play()
-
-        print(f"Start offset set to {seconds:.2f} seconds.")
+        self._request_seek(seconds)
+        self.position = int(seconds * self.fs)
+        print(f"Seek requested to {seconds:.2f} seconds.")
 
     def seek_to(self, seconds: float):
         """
@@ -476,31 +477,43 @@ class AudioPlayer:
             print("No audio loaded.")
             return
         
-        # Stop current playback and processing
-        if self.stream is not None:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-        self.stop_event.set()
-        if self.processing_thread is not None:
-            self.processing_thread.join(timeout=1.0)
+        duration = self.get_duration()
 
-        # Reset processor state (overlap buffer, etc.)
-        self._reset_process_variables()
+        if seconds >= duration:
+            print(f"Offset is too large. Audio duration is only {duration:.2f} seconds.")
+            return
 
-        # Reset the file reader to the new position
-        self.ambi_file.seek_to_time(seconds)
+        # in case we are not already streaming/processing data just update internal state
+        if self.stream is None or self.processing_thread is None:
+            self._reset_process_variables()
+            self.ambi_file.seek_to_time(seconds)
+            self._clear_audio_queue()
+            self.position = int(seconds * self.fs)
+            print(f"Seeked to {seconds:.2f} seconds.")
+            return
 
-        # Clear the audio queue
+        self._request_seek(seconds)
+        self.position = int(seconds * self.fs)
+        print(f"Seek requested to {seconds:.2f} seconds.")
+
+    def _clear_audio_queue(self):
+        """
+        Drains and discards all queued items in the audio_queue
+        """
         while not self.audio_queue.empty():
             try:
+                # drain the next item in the queue
                 self.audio_queue.get_nowait()
             except queue.Empty:
+                # exit when queue is empty
                 break
 
-        # Restart playback
-        self.play()
-        print(f"Seeked to {seconds:.2f} seconds.")
+    def _request_seek(self, seconds: float):
+        self.seek_target = max(0.0, min(seconds, self.get_duration()))
+        self.current_block = None
+        self.current_block_pos = 0
+        self._clear_audio_queue()
+        self.seek_event.set()
 
     def set_loop(self, enabled: bool):
         """
@@ -527,6 +540,10 @@ class AudioPlayer:
 
         if not self.is_loaded:
             return 0.0
+        
+        # in case we are currently in a seek event: update time correctly
+        if self.seek_event.is_set():
+            return self.seek_target
 
         return self.ambi_file.get_current_time()
 
