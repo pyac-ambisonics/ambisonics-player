@@ -188,7 +188,8 @@ class SphericalHarmonics:
         # D is (SH, SH)
         # We want D @ data
         # einsum: ij, cjk -> cik
-        self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
+        # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
+        self.hrir_nm_rot = self.D @ hrir_rot
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
@@ -316,7 +317,7 @@ class SphericalHarmonics:
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
-            # perform convolution in frequency domain and sum in frequency domain
+            # perform convolution in rotated frequency domain and sum in frequency domain
             fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
         
         # Sum over channels -> single‑channel binaural signals
