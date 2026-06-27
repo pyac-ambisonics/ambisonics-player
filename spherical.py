@@ -120,6 +120,7 @@ class SphericalHarmonics:
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self.D = None
+        self.rotation_backend_available = wigner_d_matrix is not None
         self._warned_rotation_fallback = False
         self._apply_rotation([0, 0, 0])
 
@@ -161,6 +162,14 @@ class SphericalHarmonics:
         rotation = Rotation.from_euler("zyx", angles, degrees=True)
         alpha, beta, gamma = rotation.as_euler("zyz")
         self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+
+    def has_rotation_backend(self):
+        return self.rotation_backend_available
+
+    def get_rotation_backend_status(self):
+        if self.rotation_backend_available:
+            return "available"
+        return "fallback identity (audio rotation disabled)"
 
     # set the current rotation angle
     def _apply_rotation(self, angles=None):
