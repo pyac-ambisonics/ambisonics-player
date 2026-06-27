@@ -6,9 +6,13 @@ import spharpy as sh
 from scipy import signal as sgn
 from hrtf import HRTF, Processing
 from scipy.spatial.transform import Rotation
-from shroom.utils.rotation_utils import wigner_d_matrix
 import utils
 import time
+
+try:
+    from shroom.utils.rotation_utils import wigner_d_matrix
+except ModuleNotFoundError:
+    wigner_d_matrix = None
 
 class SphericalHarmonics:
     """
@@ -75,7 +79,7 @@ class SphericalHarmonics:
                                               )
 
         # store the sources in a Sampling Sphere
-        self.sources = sh.SamplingSphere.from_coordinates(hrtf.sources)
+        self.sources = sh.SamplingSphere.from_coordinates(self.hrtf.sources)
 
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = ambi_order
@@ -116,6 +120,7 @@ class SphericalHarmonics:
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self.D = None
+        self._warned_rotation_fallback = False
         self._apply_rotation([0, 0, 0])
 
         # prepare pre_gain for gianstaging
@@ -142,15 +147,19 @@ class SphericalHarmonics:
         angles : sequence of float
             Euler angles in degrees as (z, y, x).
         """
-        # get rotation and prepare a copy of our hrirs
+        self._update_rotation_matrix(angles)
+
+    def _update_rotation_matrix(self, angles):
+        if wigner_d_matrix is None:
+            if not self._warned_rotation_fallback:
+                print("shroom.utils.rotation_utils is not available. Rotation is disabled.")
+                self._warned_rotation_fallback = True
+            channels = utils.order_to_channel_n(self.ambi_order)
+            self.D = np.eye(channels)
+            return
+
         rotation = Rotation.from_euler("zyx", angles, degrees=True)
-
-        # based on Yhonatangayer's pyshroom implementation
-        # 1. Get Euler angles (Z-Y-Z convention for Wigner-D)
-        # Note: scipy uses intrinsic rotations by default for 'zyz'
         alpha, beta, gamma = rotation.as_euler("zyz")
-
-        # 2. Compute Wigner-D matrix
         self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
     # set the current rotation angle
@@ -169,16 +178,9 @@ class SphericalHarmonics:
         """
         # update the wigner D matrix if angles were given
         if angles is not None:
-            # get rotation and prepare a copy of our hrirs
-            rotation = Rotation.from_euler("zyx", angles, degrees=True)
-
-            # based on Yhonatangayer's pyshroom implementation
-            # 1. Get Euler angles (Z-Y-Z convention for Wigner-D)
-            # Note: scipy uses intrinsic rotations by default for 'zyz'
-            alpha, beta, gamma = rotation.as_euler("zyz")
-
-            # 2. Compute Wigner-D matrix
-            self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+            self._update_rotation_matrix(angles)
+        elif self.D is None:
+            self._update_rotation_matrix([0, 0, 0])
         
         # using the fft, since we expect this to be faster than time domain
         hrir_rot = self.hrir_nm_fft.copy()

@@ -3,7 +3,11 @@ import pyfar as pf
 import numpy as np
 import pooch
 import spharpy
-import shroom.utils.math_utils as sh_util
+
+try:
+    import shroom.utils.math_utils as sh_util
+except ModuleNotFoundError:
+    sh_util = None
 
 class HRTF:
     """
@@ -40,22 +44,37 @@ class HRTF:
         `path`. On failure it will try to download a default HRTF from the
         internet using `load_hrtf_from_web()`.
         """
-        # set the path for this HRTF
-        try:
-            self.path = Path(path)
-        except Exception as e:
-            print(f"Couldn't parse path: {path}. {e}")
-            self.path = None
+        self.app_dir = Path(__file__).resolve().parent
+        self.path = self._resolve_path(path)
 
         # load HRTF from files
         self.hrirs, self.sources = self.load_HRTF()
         self.hrirs_linear = self.hrirs.copy()
 
         # make a list of all subdirectories of our Headphone filters
-        self.resources = Path("resources")
+        self.resources = self.app_dir / "resources"
         self.hp_dir = self.resources / "Headphones"
-        hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()]
+        hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
         self.hp_list = [x.name for x in hp_subdir]
+
+    def _resolve_path(self, path):
+        if path is None:
+            return None
+
+        try:
+            candidate = Path(path)
+        except TypeError as error:
+            print(f"Couldn't parse path: {path}. {error}")
+            return None
+
+        if candidate.is_absolute():
+            return candidate
+
+        local_candidate = self.app_dir / candidate
+        if local_candidate.exists():
+            return local_candidate
+
+        return candidate
 
     def get_IR_length(self):
         """
@@ -84,13 +103,15 @@ class HRTF:
         ----------
         If local loading fails, load_hrtf_from_web() is invoked as a fallback.
         """
-        try:
+        if self.path is not None:
             # load HRIRs and source positions
-            hrirs, sources, _ = pf.io.read_sofa(self.path)
-            print("Loaded HRTF from file")
-            return hrirs, sources
-        except Exception as e:
-            print(f"Couldn't load the HRTF from file. Exception: {e}\nAttempting to load from web instead. ")
+            try:
+                hrirs, sources, _ = pf.io.read_sofa(self.path)
+                print(f"Loaded HRTF from file: {self.path}")
+                return hrirs, sources
+            except Exception as e:
+                print(f"Couldn't load the HRTF from file. Exception: {e}\nAttempting to load from web instead. ")
+
         # try to load HRTF from web
         return self.load_hrtf_from_web()
 
@@ -142,7 +163,14 @@ class HRTF:
         The loaded filter is convolved with self.hrirs before returning.
         """
 
+        if name in (None, "", "None"):
+            self.reset_hrirs()
+            return None
+
         path = self.hp_dir / name
+        if not path.exists():
+            raise FileNotFoundError(f"Headphone filter folder not found: {path}")
+
         # load HRIRs and source positions
         try: 
             # this somehow always fails because of some bullshit with sofa conventions.
@@ -152,7 +180,16 @@ class HRTF:
         except Exception as e:
             #print(e)
             hp_filter = pf.io.read_audio(path / "HpFilter.wav")
+            if isinstance(hp_filter, tuple):
+                hp_filter = hp_filter[0]
             print(f"Loaded Headphone Filter {name} from wav")
+
+        if hp_filter.sampling_rate != self.hrirs_linear.sampling_rate:
+            hp_filter = pf.dsp.resample(
+                hp_filter,
+                self.hrirs_linear.sampling_rate,
+                match_amplitude="freq",
+            )
         
         # apply headphone filter to hrirs
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
@@ -235,21 +272,26 @@ class Processing:
                 self.current_algorithm = algorithm
                 return self.__ls(hrirs, sh)
             case 'MagLS':
+                if not self._has_magls_backend():
+                    print("MagLS backend shroom.utils is not available. Falling back to LS preprocessing.")
+                    self.current_algorithm = 'LS'
+                    return self.__ls(hrirs, sh)
                 print("Using MagLS HRTF Preprocessing")
                 self.current_algorithm = algorithm
                 return self.__mag_ls(hrirs, sh)
             case 'TA':
-                print("TA not implemented yet. Using MagLS instead")
-                self.current_algorithm = algorithm
-                return self.__mag_ls(hrirs, sh)
+                print("TA not implemented yet. Falling back to MagLS/LS preprocessing.")
+                return self.apply_preprocessing(hrirs, sh, algorithm='MagLS')
             case 'BiMagLS':
-                print("BiMagLS not implemented yet. Using MagLS instead")
-                self.current_algorithm = algorithm
-                return self.__mag_ls(hrirs, sh)
+                print("BiMagLS not implemented yet. Falling back to MagLS/LS preprocessing.")
+                return self.apply_preprocessing(hrirs, sh, algorithm='MagLS')
             case _:
-                print("Using default MagLS processing.")
-                self.current_algorithm = algorithm
+                print("Unknown preprocessing algorithm. Using LS preprocessing.")
+                self.current_algorithm = 'LS'
                 return self.__ls(hrirs, sh)
+
+    def _has_magls_backend(self):
+        return sh_util is not None and hasattr(sh_util, "magls")
 
     # solves the Least Squares Problem. This means just applying the spherical Harmonics to the HRTF
     def __ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics):

@@ -1,13 +1,8 @@
-from gui_player_v2 import AudioPlayerGUI
-from hrtf import HRTF
-from spherical import SphericalHarmonics
-from ambisonics_file_English import AmbisonicsFile
-import time
+from gui_player_v2_new import AudioPlayerGUI
+
 
 def main():
     gui = AudioPlayerGUI()
-    
-    # start gui
     gui.run()
 
 

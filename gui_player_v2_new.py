@@ -44,6 +44,7 @@ class AudioPlayerGUI:
         self.output_type = tk.StringVar(value="Output: none")
         self.pipeline_status = tk.StringVar(value="Pipeline: waiting for input")
         self.loading_text = tk.StringVar(value="")
+        self.playback_status = tk.StringVar(value="Status: No audio loaded")
 
         # Playback state
         self.time_text = tk.StringVar(value="00:00.00 / 00:00.00")
@@ -58,12 +59,18 @@ class AudioPlayerGUI:
         self.block_size_value = tk.StringVar(value="2048")
         self.hrtf_path_value = tk.StringVar(value="Default FABIAN HRTF")
         self.headphone_value = tk.StringVar(value="None")
+        self.decoder_note = tk.StringVar(
+            value="Order, block size, HRTF, and headphone filter are applied when loading a file."
+        )
 
         # Manual rotation, maps to SphericalHarmonics.set_rotation([z, y, x])
         self.yaw_value = tk.DoubleVar(value=0.0)
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
+        self.rotation_note = tk.StringVar(
+            value="Manual scene rotation only. Hardware head tracking is not connected."
+        )
 
         self.setup_style()
         self.create_widgets()
@@ -141,6 +148,9 @@ class AudioPlayerGUI:
         card.pack(fill=tk.X, pady=(0, 14))
 
         ttk.Label(card, text="Input", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(card, textvariable=self.playback_status, style="SmallInfo.TLabel").grid(
+            row=0, column=1, sticky="e", padx=(16, 0)
+        )
 
         self.ambix_button = ttk.Button(
             card,
@@ -150,16 +160,8 @@ class AudioPlayerGUI:
         )
         self.ambix_button.grid(row=0, column=2, padx=(20, 0), sticky="e")
 
-        self.wav_button = ttk.Button(
-            card,
-            text="Load Binaural WAV (disabled)",
-            command=self.show_wav_disabled_message,
-        )
-        self.wav_button.grid(row=1, column=2, padx=(20, 0), pady=(8, 0), sticky="e")
-        self.wav_button.configure(state=tk.DISABLED)
-
         ttk.Label(card, textvariable=self.selected_file, style="SmallInfo.TLabel").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(10, 0)
+            row=1, column=0, columnspan=3, sticky="w", pady=(10, 0)
         )
         ttk.Label(card, textvariable=self.input_type, style="SmallInfo.TLabel").grid(
             row=2, column=0, sticky="w", pady=(6, 0)
@@ -225,7 +227,10 @@ class AudioPlayerGUI:
         card.pack(fill=tk.X, pady=(0, 14))
 
         ttk.Label(card, text="Decoder Settings", style="Section.TLabel").grid(
-            row=0, column=0, columnspan=6, sticky="w"
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(card, textvariable=self.decoder_note, style="SmallInfo.TLabel").grid(
+            row=0, column=2, columnspan=4, sticky="e", padx=(16, 0)
         )
 
         ttk.Label(card, text="Order", background="white", font=("Arial", 10, "bold")).grid(
@@ -315,7 +320,10 @@ class AudioPlayerGUI:
         card.pack(fill=tk.X, pady=(0, 14))
 
         ttk.Label(card, text="Manual Rotation", style="Section.TLabel").grid(
-            row=0, column=0, columnspan=5, sticky="w"
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(card, textvariable=self.rotation_note, style="SmallInfo.TLabel").grid(
+            row=0, column=2, columnspan=3, sticky="e", padx=(16, 0)
         )
 
         self.yaw_slider = self.create_rotation_slider(card, "Yaw Z", self.yaw_value, 1)
@@ -410,6 +418,7 @@ class AudioPlayerGUI:
 
         if loading:
             self.loading_text.set(message or "Loading...")
+            self.playback_status.set("Status: Loading")
             self.pipeline_status.set(f"Pipeline: {message or 'loading'}")
             self.ambix_button.configure(state=tk.DISABLED)
             self.order_box.configure(state=tk.DISABLED)
@@ -502,6 +511,7 @@ class AudioPlayerGUI:
         self.input_type.set("Input type: AmbiX / multichannel WAV")
         self.output_type.set("Output: preparing binaural stream")
         self.pipeline_status.set("Pipeline: loading AmbiX and preparing decoder")
+        self.playback_status.set("Status: Loading")
         self.write_info_text(self.build_info_text())
 
         order = self.get_order()
@@ -584,6 +594,7 @@ class AudioPlayerGUI:
                     )
                     self.output_type.set("Output: binaural streaming")
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
+                    self.playback_status.set("Status: Loaded")
 
                     self.reset_progress_display()
                     self.update_rotation_label()
@@ -592,6 +603,7 @@ class AudioPlayerGUI:
                 else:
                     self.set_loading(False)
                     self.pipeline_status.set("Pipeline: load failed")
+                    self.playback_status.set("Status: Load failed")
                     self.set_controls_enabled(False)
                     self.update_info()
                     messagebox.showerror("Load error", payload)
@@ -607,6 +619,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.play()
+            self.playback_status.set("Status: Playing")
             self.update_info()
         except Exception as error:
             messagebox.showerror("Error", str(error))
@@ -616,6 +629,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.pause()
+            self.playback_status.set("Status: Paused")
             self.update_info()
         except Exception as error:
             messagebox.showerror("Error", str(error))
@@ -625,6 +639,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.stop()
+            self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
             self.time_text.set(
                 f"{self.format_time(0.0)} / {self.format_time(self.player.get_duration())}"
@@ -661,6 +676,7 @@ class AudioPlayerGUI:
 
             self.player.seek_to(seconds)
             self.progress_value.set(self.player.get_current_time())
+            self.playback_status.set("Status: Seeked")
             self.update_info()
         except ValueError as error:
             messagebox.showerror("Invalid offset", str(error))
@@ -702,6 +718,7 @@ class AudioPlayerGUI:
             seconds = float(self.progress_value.get())
             self.player.seek_to(seconds)
             self.progress_value.set(self.player.get_current_time())
+            self.playback_status.set("Status: Seeked")
             self.update_info()
         except Exception as error:
             messagebox.showerror("Error", str(error))
@@ -731,6 +748,7 @@ class AudioPlayerGUI:
             self.player.sh.set_rotation([yaw, pitch, roll])
             self.update_rotation_label()
             self.pipeline_status.set("Pipeline: rotation matrix updated")
+            self.playback_status.set("Status: Rotation updated")
             self.update_info()
         except Exception as error:
             messagebox.showerror("Rotation error", str(error))
@@ -771,10 +789,9 @@ class AudioPlayerGUI:
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_text.get()}\n\n"
             "Notes:\n"
-            "Manual rotation updates the SH rotation matrix. Hardware headtracking "
-            "still needs a separate tracker thread before it should be enabled for demos.\n"
-            "Standalone binaural WAV playback is disabled in this GUI because the current "
-            "backend is the AmbiX streaming decoder."
+            "Manual rotation updates the SH rotation matrix when the rotation backend is available. "
+            "Hardware head tracking still needs a separate tracker thread before it should be "
+            "enabled for demos."
         )
 
     def write_info_text(self, text):
@@ -797,6 +814,7 @@ class AudioPlayerGUI:
                     f"{self.format_time(current_time)} / {self.format_time(duration)}"
                 )
 
+            self.refresh_playback_status()
             self.update_info()
 
         self.root.after(250, self.update_gui_loop)
@@ -806,6 +824,15 @@ class AudioPlayerGUI:
         minutes = int(seconds // 60)
         secs = seconds % 60
         return f"{minutes:02d}:{secs:05.2f}"
+
+    def refresh_playback_status(self):
+        if not self.has_loaded_player() or self.is_loading:
+            return
+
+        if self.player.pause_event.is_set():
+            self.playback_status.set("Status: Paused")
+        elif self.player.play_event.is_set() and not self.player.stop_event.is_set():
+            self.playback_status.set("Status: Playing")
 
     # ==============================================================
     # Lifecycle
