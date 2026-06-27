@@ -1,4 +1,9 @@
-python-osc
+numpy
+scipy
+sounddevice
+soundfile
 pyfar
 spharpy
+pooch
 shroom
+python-osc
