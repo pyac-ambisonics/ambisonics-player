@@ -59,7 +59,7 @@ class AudioPlayerGUI:
 
         # Decoder settings
         self.order_value = tk.StringVar(value="Auto")
-        self.block_size_value = tk.StringVar(value="2048")
+        self.block_size_value = tk.StringVar(value="1024")
         self.hrtf_path_value = tk.StringVar(value="Default FABIAN HRTF")
         self.headphone_value = tk.StringVar(value="None")
         self.loaded_settings_text = tk.StringVar(value="Loaded settings: none")
@@ -262,7 +262,7 @@ class AudioPlayerGUI:
         self.block_size_box = ttk.Combobox(
             card,
             textvariable=self.block_size_value,
-            values=["1024", "2048", "4096"],
+            values=["512", "1024", "2048", "4096"],
             state="readonly",
             width=10,
         )
