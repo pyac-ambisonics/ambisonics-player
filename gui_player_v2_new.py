@@ -1,6 +1,7 @@
 import math
 import os
 import threading
+import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Queue
@@ -575,6 +576,12 @@ class AudioPlayerGUI:
             status = "unknown"
         self.rotation_backend_text.set(f"Rotation backend: {status}")
 
+    def _handle_error(self, title, error):
+        message = str(error)
+        print(f"[{title}] {message}")
+        traceback.print_exc()
+        messagebox.showerror(title, message)
+
     # ==============================================================
     # Loading
     # ==============================================================
@@ -659,6 +666,7 @@ class AudioPlayerGUI:
                 }
                 self._backend_load_queue.put(("success", result))
             except Exception as error:
+                traceback.print_exc()
                 self._backend_load_queue.put(("error", str(error)))
             finally:
                 os.chdir(old_cwd)
@@ -701,7 +709,7 @@ class AudioPlayerGUI:
                     self.playback_status.set("Status: Load failed")
                     self.set_controls_enabled(False)
                     self.update_info()
-                    messagebox.showerror("Load error", payload)
+                    self._handle_error("load Error", payload)
         finally:
             self.root.after(100, self._process_backend_load_queue)
 
@@ -717,7 +725,7 @@ class AudioPlayerGUI:
             self.playback_status.set("Status: Playing")
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     def pause(self):
         if not self.has_loaded_player():
@@ -727,7 +735,7 @@ class AudioPlayerGUI:
             self.playback_status.set("Status: Paused")
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     def stop(self):
         if not self.has_loaded_player():
@@ -741,7 +749,7 @@ class AudioPlayerGUI:
             )
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     def set_volume(self, value):
         volume = max(0.0, min(float(value), 1.0))
@@ -754,7 +762,7 @@ class AudioPlayerGUI:
             self.player.set_volume(volume)
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     def set_offset(self):
         if not self.has_loaded_player():
@@ -774,9 +782,9 @@ class AudioPlayerGUI:
             self.playback_status.set("Status: Seeked")
             self.update_info()
         except ValueError as error:
-            messagebox.showerror("Invalid offset", str(error))
+            self._handle_error("Invalid offset", error)
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     def set_loop(self):
         if not self.has_loaded_player():
@@ -785,7 +793,7 @@ class AudioPlayerGUI:
             self.player.set_loop(self.loop_value.get())
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
 
     # ==============================================================
     # Progress / seek
@@ -816,7 +824,7 @@ class AudioPlayerGUI:
             self.playback_status.set("Status: Seeked")
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._handle_error("Error", error)
         finally:
             self.is_dragging_progress = False
 
@@ -853,7 +861,7 @@ class AudioPlayerGUI:
             self.playback_status.set("Status: Rotation updated")
             self.update_info()
         except Exception as error:
-            messagebox.showerror("Rotation error", str(error))
+            self._handle_error("Rotation Error", error)
 
     def reset_rotation(self):
         self.yaw_value.set(0.0)
