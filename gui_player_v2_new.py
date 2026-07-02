@@ -37,8 +37,8 @@ class AudioPlayerGUI:
 
         self.root = tk.Tk()
         self.root.title("Ambisonics Player")
-        self.root.geometry("1100x940")
-        self.root.minsize(1000, 840)
+        self.root.geometry("1100x820")
+        self.root.minsize(900, 560)
 
         # File / pipeline state
         self.selected_file = tk.StringVar(value="No input loaded")
@@ -137,8 +137,36 @@ class AudioPlayerGUI:
     # ==============================================================
 
     def create_widgets(self):
-        main = ttk.Frame(self.root, padding=24)
-        main.pack(fill=tk.BOTH, expand=True)
+        self.scroll_canvas = tk.Canvas(
+            self.root,
+            bg="#f5f6f8",
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        self.page_scrollbar = ttk.Scrollbar(
+            self.root,
+            orient=tk.VERTICAL,
+            command=self.scroll_canvas.yview,
+        )
+        self.scroll_canvas.configure(yscrollcommand=self.page_scrollbar.set)
+
+        self.page_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.scroll_frame = ttk.Frame(self.scroll_canvas, padding=24)
+        self.scroll_window = self.scroll_canvas.create_window(
+            (0, 0),
+            window=self.scroll_frame,
+            anchor="nw",
+        )
+
+        self.scroll_frame.bind("<Configure>", self.on_scroll_frame_configure)
+        self.scroll_canvas.bind("<Configure>", self.on_scroll_canvas_configure)
+        self.root.bind_all("<MouseWheel>", self.on_mousewheel)
+        self.root.bind_all("<Button-4>", self.on_mousewheel)
+        self.root.bind_all("<Button-5>", self.on_mousewheel)
+
+        main = self.scroll_frame
 
         ttk.Label(main, text="Ambisonics Player", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
@@ -152,6 +180,23 @@ class AudioPlayerGUI:
         self.create_decoder_settings_card(main)
         self.create_rotation_card(main)
         self.create_info_card(main)
+
+    def on_scroll_frame_configure(self, _event=None):
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def on_scroll_canvas_configure(self, event):
+        self.scroll_canvas.itemconfigure(self.scroll_window, width=event.width)
+
+    def on_mousewheel(self, event):
+        if event.widget is getattr(self, "info_text", None):
+            return
+
+        if getattr(event, "num", None) == 4:
+            self.scroll_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            self.scroll_canvas.yview_scroll(1, "units")
+        else:
+            self.scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def create_input_card(self, parent):
         card = ttk.Frame(parent, style="Card.TFrame", padding=18)
