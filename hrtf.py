@@ -57,6 +57,7 @@ class HRTF:
         self.hp_dir = self.resources / "Headphones"
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
         self.hp_list = [x.name for x in hp_subdir]
+        self.hp_list.append("Diffuse Field Equalization")
 
     def _resolve_path(self, path):
         if path is None:
@@ -173,6 +174,10 @@ class HRTF:
         if name in (None, "", "None"):
             self.reset_hrirs()
             return None
+        
+        # do Diffuse Field Equalization as default
+        if name == "Diffuse Field Equalization":
+            return self.apply_dfe()
 
         path = self.hp_dir / name
         if not path.exists():
@@ -200,7 +205,7 @@ class HRTF:
 
             # apply a kaiser window to our filter, makin the filter 'n_samples' long
             hp_filter = pf.dsp.time_window(hp_filter, 
-                                            (0, desired_length), 
+                                            (0, desired_length-1), 
                                             window=('kaiser', 8), 
                                             shape='right', 
                                             crop='window')
@@ -217,6 +222,23 @@ class HRTF:
         This resets self.hrirs to the copy stored in self.hrirs_linear.
         """
         self.hrirs = self.hrirs_linear.copy()
+
+    def apply_dfe(self):
+        # averaging each HRTF with the average of all HRTF
+        average = pf.dsp.average(self.hrirs_linear, mode='power',caxis=0)
+        # Inversion
+        regularized = pf.dsp.RegularizedSpectrumInversion.from_frequency_range(
+            average, [50, 16e3], beta='max')
+        inverted = regularized.invert
+        # minimum phase
+        min_phase_dfe = pf.dsp.minimum_phase(inverted, truncate=False)
+
+        # convolve hrirs with the dfe filter
+        self.hrirs = pf.dsp.convolve(self.hrirs_linear, min_phase_dfe, mode='full')
+
+        print(f"Samplelength of HRIR: {self.get_IR_length()}")
+        return min_phase_dfe
+
     
 # a class making different HRTF preprocessing algorithms available
 class Processing:

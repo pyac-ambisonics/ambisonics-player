@@ -61,7 +61,7 @@ class AudioPlayerGUI:
         self.order_value = tk.StringVar(value="Auto")
         self.block_size_value = tk.StringVar(value="1024")
         self.hrtf_path_value = tk.StringVar(value="Default FABIAN HRTF")
-        self.headphone_value = tk.StringVar(value="None")
+        self.headphone_value = tk.StringVar(value="Diffuse Field Equalization")
         self.loaded_settings_text = tk.StringVar(value="Loaded settings: none")
         self.decoder_note = tk.StringVar(
             value="Order, block size, HRTF, and headphone filter are applied when loading a file."
@@ -537,7 +537,7 @@ class AudioPlayerGUI:
         hp_dir = self.app_dir / "resources" / "Headphones"
         if not hp_dir.exists():
             return ["None"]
-        return ["None"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
+        return ["None"] + ["Diffuse Field Equalization"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
 
     def select_hrtf_file(self):
         file_path = filedialog.askopenfilename(
