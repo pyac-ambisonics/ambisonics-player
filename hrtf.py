@@ -3,6 +3,7 @@ import pyfar as pf
 import numpy as np
 import pooch
 import spharpy
+import scipy.signal as sgn
 
 try:
     import shroom.utils.math_utils as sh_util
@@ -56,6 +57,7 @@ class HRTF:
         self.hp_dir = self.resources / "Headphones"
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
         self.hp_list = [x.name for x in hp_subdir]
+        self.hp_list.append("Diffuse Field Equalization")
 
     def _resolve_path(self, path):
         if path is None:
@@ -143,7 +145,7 @@ class HRTF:
     
     # loads a specific headphone filter given by the path
     # applies it to the hrir loaded
-    def load_hp_filter(self, name):
+    def load_hp_filter(self, name, min_phase=True, n_samples=512):
         """
         Load a headphone compensation filter by name and apply it to current HRIRs.
         
@@ -151,6 +153,12 @@ class HRTF:
         -------------
         name : str
             Subdirectory name under Headphones identifying the headphone.
+        min_phase : bool, optional
+            A boolean telling the function to use minimum phase conversion of the headphone filter. If true, 
+            the filter will be converted to minimum phase, resulting in a way shorter filter signal, and making
+            real time computation possible. By default minimum phase conversion is turned on.
+        n_samples : int, optional
+            An integer indicating the desired length of the resulting min HRIR
 
         Returns
         -------------
@@ -166,31 +174,42 @@ class HRTF:
         if name in (None, "", "None"):
             self.reset_hrirs()
             return None
+        
+        # do Diffuse Field Equalization as default
+        if name == "Diffuse Field Equalization":
+            return self.apply_dfe()
 
         path = self.hp_dir / name
         if not path.exists():
             raise FileNotFoundError(f"Headphone filter folder not found: {path}")
 
-        # load HRIRs and source positions
-        try: 
-            # this somehow always fails because of some bullshit with sofa conventions.
-            # thats why we load wavs instead
-            hp_filter, *_ = pf.io.read_sofa(path / "HpIRs.sofa")
-            print(f"Loaded Headphone Filter {name} from sofa")
-        except Exception as e:
-            #print(e)
-            hp_filter = pf.io.read_audio(path / "HpFilter.wav")
-            if isinstance(hp_filter, tuple):
-                hp_filter = hp_filter[0]
-            print(f"Loaded Headphone Filter {name} from wav")
+        # load headphoen filter as WAV
+        hp_filter = pf.io.read_audio(path / "HpFilter.wav")
+        if isinstance(hp_filter, tuple):
+            hp_filter = hp_filter[0]
+        print(f"Loaded Headphone Filter {name} from wav")
 
-        if hp_filter.sampling_rate != self.hrirs_linear.sampling_rate:
+        fs = self.hrirs_linear.sampling_rate
+        if hp_filter.sampling_rate != fs:
             hp_filter = pf.dsp.resample(
                 hp_filter,
                 self.hrirs_linear.sampling_rate,
                 match_amplitude="freq",
             )
         
+        # apply minimum phase conversion
+        if min_phase:
+            desired_length = n_samples - self.get_IR_length()
+            # apply it before convolution to the hp_filter
+            hp_filter = pf.dsp.minimum_phase(hp_filter)
+
+            # apply a kaiser window to our filter, makin the filter 'n_samples' long
+            hp_filter = pf.dsp.time_window(hp_filter, 
+                                            (0, desired_length-1), 
+                                            window=('kaiser', 8), 
+                                            shape='right', 
+                                            crop='window')
+            
         # apply headphone filter to hrirs
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
         print(f"Samplelength of HRIR: {self.get_IR_length()}")
@@ -203,6 +222,23 @@ class HRTF:
         This resets self.hrirs to the copy stored in self.hrirs_linear.
         """
         self.hrirs = self.hrirs_linear.copy()
+
+    def apply_dfe(self):
+        # averaging each HRTF with the average of all HRTF
+        average = pf.dsp.average(self.hrirs_linear, mode='power',caxis=0)
+        # Inversion
+        regularized = pf.dsp.RegularizedSpectrumInversion.from_frequency_range(
+            average, [50, 16e3], beta='max')
+        inverted = regularized.invert
+        # minimum phase
+        min_phase_dfe = pf.dsp.minimum_phase(inverted, truncate=False)
+
+        # convolve hrirs with the dfe filter
+        self.hrirs = pf.dsp.convolve(self.hrirs_linear, min_phase_dfe, mode='full')
+
+        print(f"Samplelength of HRIR: {self.get_IR_length()}")
+        return min_phase_dfe
+
     
 # a class making different HRTF preprocessing algorithms available
 class Processing:
