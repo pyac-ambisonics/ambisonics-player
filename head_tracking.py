@@ -2,6 +2,9 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+from pythonosc.udp_client import SimpleUDPClient
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
 
 
 @dataclass(frozen=True)
@@ -70,41 +73,76 @@ class DemoHeadTracker:
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
 
 
-class OscHeadTracker:
+class OSCHeadTracker:
     """
-    Optional OSC receiver skeleton.
-
-    The demo GUI does not start this class yet, but it documents the intended
-    extension path: receive `/headtracker yaw pitch roll` and write it into the
-    same OrientationState used by the demo tracker.
+    Provides headtracker support for hardware that supports sending data via OSC
     """
 
-    def __init__(self, orientation_state, host="127.0.0.1", port=9000):
+    def __init__(
+        self,
+        orientation_state,
+        listen_host="127.0.0.1",
+        listen_port=8000,
+        write_host="127.0.0.1",
+        write_port=9010,
+    ):
         self.orientation_state = orientation_state
-        self.host = host
-        self.port = int(port)
+        self.listen_host = listen_host
+        self.listen_port = listen_port
+        self.write_host = write_host
+        self.write_port = write_port
         self._server = None
         self._thread = None
+        self._client = None
+        self.connected = False
 
+    # start 
     def start(self):
-        try:
-            from pythonosc.dispatcher import Dispatcher
-            from pythonosc.osc_server import ThreadingOSCUDPServer
-        except ModuleNotFoundError as error:
-            raise RuntimeError("python-osc is required for OSC head tracking.") from error
-
         dispatcher = Dispatcher()
-        dispatcher.map("/headtracker", self._handle_orientation)
-        self._server = ThreadingOSCUDPServer((self.host, self.port), dispatcher)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        dispatcher.map(
+            "/[yaw,pitch,roll]",
+            self._handle_orientation
+        )
+        dispatcher.set_default_handler(
+            self._unknown_packet
+        )
+        self._server = ThreadingOSCUDPServer(
+            (self.listen_host, self.listen_port),
+            dispatcher
+        )
+        self._client = SimpleUDPClient(
+            self.write_host,
+            self.write_port
+        )
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            daemon=True
+        )
         self._thread.start()
 
+    # receiving
+    def _handle_orientation(self, address, *args):#yaw, pitch, roll instead of *args
+        print(address)
+        print(args)
+        """self.connected = True
+        self.orientation_state.set(
+            yaw,
+            pitch,
+            roll,
+            source="osc"
+        )"""
+
+    # zeroing
+    def zero(self):
+        if self._client is not None:
+            self._client.send_message("/zero", 1)
+
+    # shutdown
     def stop(self):
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
-            self._server = None
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        self._server = None
         self._thread = None
-
-    def _handle_orientation(self, _address, yaw, pitch=0.0, roll=0.0):
-        self.orientation_state.set(yaw, pitch, roll, source="osc")
