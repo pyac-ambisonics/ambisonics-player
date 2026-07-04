@@ -869,16 +869,8 @@ class AudioPlayerGUI:
         self.roll_value.set(0.0)
         self.apply_rotation()
 
-    def has_rotation_audio_backend(self):
-        return (
-            self.has_loaded_player()
-            and hasattr(self.player.sh, "has_rotation_backend")
-            and self.player.sh.has_rotation_backend()
-        )
-
     def apply_orientation_to_audio(self, orientation):
-        if self.has_rotation_audio_backend():
-            self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
+        self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
 
     def start_demo_tracking(self):
         self.tracking_mode.set("Demo")

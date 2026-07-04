@@ -8,11 +8,8 @@ from hrtf import HRTF, Processing
 from scipy.spatial.transform import Rotation
 import utils
 import time
-
-try:
-    from shroom.utils.rotation_utils import wigner_d_matrix
-except ModuleNotFoundError:
-    wigner_d_matrix = None
+from shroom.utils.rotation_utils import wigner_d_matrix
+import threading
 
 class SphericalHarmonics:
     """
@@ -119,10 +116,9 @@ class SphericalHarmonics:
 
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
-        self.D = None
-        self.rotation_backend_available = wigner_d_matrix is not None
-        self._warned_rotation_fallback = False
-        self._apply_rotation([0, 0, 0])
+        self._D = None
+        self._rotation_lock = threading.Lock()
+        self.set_rotation([0, 0, 0])
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self._find_gain()
@@ -139,58 +135,39 @@ class SphericalHarmonics:
         *_, n_samples = self.hrir_nm.shape
         return n_samples
     
-    def set_rotation(self, angles):
+    def set_rotation(self, angles, convention='zyx'):
         """
         Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx).
+        The updating is done in a thread-safe manner.
 
         Parameters
         ----------
         angles : sequence of float
             Euler angles in degrees as (z, y, x).
+        convention : str
+            A string identifying the used convention/order of the angles. 'zyx' is default.
         """
-        self._update_rotation_matrix(angles)
-
-    def _update_rotation_matrix(self, angles):
-        if wigner_d_matrix is None:
-            if not self._warned_rotation_fallback:
-                print("shroom.utils.rotation_utils is not available. Rotation is disabled.")
-                self._warned_rotation_fallback = True
-            channels = utils.order_to_channel_n(self.ambi_order)
-            self.D = np.eye(channels)
-            return
-
-        rotation = Rotation.from_euler("zyx", angles, degrees=True)
+        rotation = Rotation.from_euler(convention, angles, degrees=True)
         alpha, beta, gamma = rotation.as_euler("zyz")
-        self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+        new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
-    def has_rotation_backend(self):
-        return self.rotation_backend_available
+        with self._rotation_lock:
+            self._D = new_D
 
-    def get_rotation_backend_status(self):
-        if self.rotation_backend_available:
-            return "available"
-        return "fallback identity (audio rotation disabled)"
+    def get_rotation_matrix(self):
+        """
+        Returns a copy fo the currently stored Wigner D matrix in a thread safe manner.
+        """
+        with self._rotation_lock:
+            return self._D.copy()
 
     # set the current rotation angle
-    def _apply_rotation(self, angles=None):
+    def _apply_rotation(self):
         """
         Applies rotation to to the base SH coefficients in frequency domain. Thus, the already zero-padded
         signal is used, because that is what the frequency domain data is based on. Updates the internal state
-        of hrir_nm_rot. If angles are given, updates the internal state of the wigner-D matrix D.
-
-        Parameters
-        ----------
-        angles : sequence of float, optional
-            Euler angles in degrees as (z, y, x).
-            If no angles are given, uses the last available internally stored angles.
-            If angles are given, updates the internally stored angles.
+        of hrir_nm_rot. 
         """
-        # update the wigner D matrix if angles were given
-        if angles is not None:
-            self._update_rotation_matrix(angles)
-        elif self.D is None:
-            self._update_rotation_matrix([0, 0, 0])
-        
         # using the fft, since we expect this to be faster than time domain
         hrir_rot = self.hrir_nm_fft.copy()
 
@@ -200,7 +177,7 @@ class SphericalHarmonics:
         # We want D @ data
         # einsum: ij, cjk -> cik
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
-        self.hrir_nm_rot = self.D @ hrir_rot
+        self.hrir_nm_rot = self.get_rotation_matrix() @ hrir_rot
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
