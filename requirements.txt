@@ -7,3 +7,4 @@ spharpy
 pooch
 pyshroom
 python-osc
+pyheadtracker

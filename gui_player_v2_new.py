@@ -1,6 +1,7 @@
 import math
 import os
 import threading
+import mido
 import tkinter as tk
 from pathlib import Path
 from queue import Queue
@@ -9,7 +10,7 @@ from tkinter import ttk
 
 from ambisonics_file_English import AmbisonicsFile
 from audio_player import AudioPlayer
-from head_tracking import DemoHeadTracker, OrientationState
+from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
 
@@ -69,13 +70,14 @@ class AudioPlayerGUI:
         # Rotation and head tracking demo state
         self.orientation_state = OrientationState()
         self.demo_tracker = DemoHeadTracker(self.orientation_state)
+        self.head_tracker = HeadTracker(self.orientation_state)
         self.yaw_value = tk.DoubleVar(value=0.0)
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
         self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(
-            value="Demo head tracking is simulated. Hardware tracking is not connected."
+            value="Hardware tracking is " + ("not " if not any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) else "") + "available."
         )
         self.tracking_mode = tk.StringVar(value="Off")
         self.tracking_status = tk.StringVar(value="Tracking: Off")
@@ -336,7 +338,7 @@ class AudioPlayerGUI:
         card = ttk.Frame(parent, style="Card.TFrame", padding=18)
         card.pack(fill=tk.X, pady=(0, 14))
 
-        ttk.Label(card, text="Rotation / Head Tracking Demo", style="Section.TLabel").grid(
+        ttk.Label(card, text="Rotation / Head Tracking", style="Section.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(card, textvariable=self.rotation_note, style="SmallInfo.TLabel").grid(
@@ -361,26 +363,30 @@ class AudioPlayerGUI:
             row=4, column=4, columnspan=2, sticky="e", pady=(16, 0)
         )
 
-        ttk.Label(card, text="Demo Tracking", background="white", font=("Arial", 10, "bold")).grid(
+        ttk.Label(card, text="Tracking", background="white", font=("Arial", 10, "bold")).grid(
             row=5, column=0, sticky="w", pady=(16, 0)
         )
         self.tracking_mode_box = ttk.Combobox(
             card,
             textvariable=self.tracking_mode,
-            values=["Off", "Demo"],
+            values=["Off", "Hardware", "Demo"],
             state="readonly",
             width=10,
         )
         self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(16, 0))
 
-        self.start_tracking_button = ttk.Button(card, text="Start Demo", command=self.start_demo_tracking)
-        self.start_tracking_button.grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", command=self.head_tracker.zero)
+        self.zero_tracker_button.grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.zero_tracker_button["state"] = "disabled"
+
+        self.start_tracking_button = ttk.Button(card, text="Start Tracking", command=self.start_head_tracking)
+        self.start_tracking_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
 
         self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
-        self.stop_tracking_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.stop_tracking_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
 
         ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
-            row=5, column=4, sticky="w", padx=(12, 0), pady=(16, 0)
+            row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0)
         )
 
         self.tracking_canvas = tk.Canvas(
@@ -872,14 +878,23 @@ class AudioPlayerGUI:
         if self.has_rotation_audio_backend():
             self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
 
-    def start_demo_tracking(self):
-        self.tracking_mode.set("Demo")
-        self.demo_tracker.start()
-        self.tracking_status.set("Tracking: Demo running")
-        self.playback_status.set("Status: Demo tracking")
+    def start_head_tracking(self):
+        match self.tracking_mode.get():
+            case "Demo":
+                self.demo_tracker.start()
+            case "Hardware":
+                self.head_tracker.start()
+                self.zero_tracker_button["state"] = "normal"
+            case "Off":
+                return
+        self.tracking_status.set("Tracking: " + self.tracking_mode.get() + " running")
+        self.playback_status.set("Status: " + self.tracking_mode.get() + " tracking")
 
     def stop_head_tracking(self, reset_orientation=True):
+        # !stop both trackers without checking which one is running - might need optimisation
         self.demo_tracker.stop()
+        self.head_tracker.stop()
+        self.zero_tracker_button["state"] = "disabled"
         self.tracking_mode.set("Off")
         self.tracking_status.set("Tracking: Off")
 
@@ -894,8 +909,23 @@ class AudioPlayerGUI:
                 self.apply_orientation_to_audio(orientation)
 
     def update_head_tracking_loop(self):
+        # !query both trackers for orientation - inefficient code!
+        if self.head_tracker.is_running():
+            orientation = self.head_tracker.orientation_state.get()
+            self.yaw_value.set(orientation.yaw)
+            self.pitch_value.set(orientation.pitch)
+            self.roll_value.set(orientation.roll)
+            self.update_rotation_label()
+            self.draw_head_tracking_visualizer(orientation)
+
+            if self.has_rotation_audio_backend():
+                self.apply_orientation_to_audio(orientation)
+                self.tracking_status.set("Tracking: hardware connected, audio rotation active")
+            else:
+                self.tracking_status.set("Tracking: hardware connected, visualizer only")
+
         if self.demo_tracker.is_running():
-            orientation = self.demo_tracker.sample()
+            orientation = self.demo_tracker.orientation_state.get()
             self.yaw_value.set(orientation.yaw)
             self.pitch_value.set(orientation.pitch)
             self.roll_value.set(orientation.roll)
