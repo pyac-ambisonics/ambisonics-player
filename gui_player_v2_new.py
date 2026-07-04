@@ -2,6 +2,7 @@ import math
 import os
 import threading
 import traceback
+import time
 import tkinter as tk
 from pathlib import Path
 from queue import Queue
@@ -74,7 +75,7 @@ class AudioPlayerGUI:
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
-        self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
+        #self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(
             value="Demo head tracking is simulated. Hardware tracking is not connected."
         )
@@ -159,7 +160,8 @@ class AudioPlayerGUI:
         card.pack(fill=tk.X, pady=(0, 14))
 
         ttk.Label(card, text="Input", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(card, textvariable=self.playback_status, style="SmallInfo.TLabel").grid(
+        self.playback_status_label = ttk.Label(card, textvariable=self.playback_status, style="SmallInfo.TLabel")
+        self.playback_status_label.grid(
             row=0, column=1, sticky="e", padx=(16, 0)
         )
 
@@ -358,9 +360,9 @@ class AudioPlayerGUI:
             row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
         )
 
-        ttk.Label(card, textvariable=self.rotation_backend_text, style="SmallInfo.TLabel").grid(
-            row=4, column=4, columnspan=2, sticky="e", pady=(16, 0)
-        )
+        # ttk.Label(card, textvariable=self.rotation_backend_text, style="SmallInfo.TLabel").grid(
+        #     row=4, column=4, columnspan=2, sticky="e", pady=(16, 0)
+        # )
 
         ttk.Label(card, text="Demo Tracking", background="white", font=("Arial", 10, "bold")).grid(
             row=5, column=0, sticky="w", pady=(16, 0)
@@ -381,7 +383,7 @@ class AudioPlayerGUI:
         self.stop_tracking_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
 
         ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
-            row=5, column=4, sticky="w", padx=(12, 0), pady=(16, 0)
+            row=5, column=4, sticky="e", padx=(12, 0), pady=(16, 0)
         )
 
         self.tracking_canvas = tk.Canvas(
@@ -395,16 +397,19 @@ class AudioPlayerGUI:
         self.tracking_canvas.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
-            row=6, column=2, columnspan=4, sticky="w", padx=(18, 0), pady=(14, 0)
+            row=6, column=2, columnspan=4, sticky="e", padx=(18, 0), pady=(14, 0)
         )
 
         self.draw_head_tracking_visualizer(self.orientation_state.get())
 
         card.columnconfigure(1, weight=1)
+        card.columnconfigure(2, weight=0)
+        card.columnconfigure(3, weight=0)
+        card.columnconfigure(4, weight=0)
 
     def create_rotation_slider(self, parent, label, variable, row):
         ttk.Label(parent, text=label, background="white", font=("Arial", 10, "bold")).grid(
-            row=row, column=0, sticky="w", pady=(14, 0)
+            row=row, column=0, sticky="ew", pady=(14, 0)
         )
         slider = ttk.Scale(
             parent,
@@ -414,7 +419,7 @@ class AudioPlayerGUI:
             variable=variable,
             command=lambda _value: self.update_rotation_label(),
         )
-        slider.grid(row=row, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(14, 0))
+        slider.grid(row=row, column=1, columnspan=4, sticky="ew", padx=(14, 18), pady=(14, 0))
         return slider
 
     def create_info_card(self, parent):
@@ -465,14 +470,14 @@ class AudioPlayerGUI:
             self.offset_entry,
             self.offset_button,
             self.loop_check,
-            self.yaw_slider,
-            self.pitch_slider,
-            self.roll_slider,
-            self.rotation_button,
-            self.reset_rotation_button,
-            self.tracking_mode_box,
-            self.start_tracking_button,
-            self.stop_tracking_button,
+            # self.yaw_slider,
+            # self.pitch_slider,
+            # self.roll_slider,
+            # self.rotation_button,
+            # self.reset_rotation_button,
+            # self.tracking_mode_box,
+            # self.start_tracking_button,
+            # self.stop_tracking_button,
         ]:
             widget.configure(state=state)
 
@@ -494,6 +499,7 @@ class AudioPlayerGUI:
         if loading:
             self.loading_text.set(message or "Loading...")
             self.playback_status.set("Status: Loading")
+            self.playback_status_label.configure(foreground="red")
             self.pipeline_status.set(f"Pipeline: {message or 'loading'}")
             self.ambix_button.configure(state=tk.DISABLED)
             self.set_decoder_settings_enabled(False)
@@ -565,16 +571,16 @@ class AudioPlayerGUI:
             f"headphone {result['headphone']}"
         )
 
-    def update_rotation_backend_status(self):
-        if not self.has_loaded_player():
-            self.rotation_backend_text.set("Rotation backend: not loaded")
-            return
+    # def update_rotation_backend_status(self):
+    #     if not self.has_loaded_player():
+    #         self.rotation_backend_text.set("Rotation backend: not loaded")
+    #         return
 
-        if hasattr(self.player.sh, "get_rotation_backend_status"):
-            status = self.player.sh.get_rotation_backend_status()
-        else:
-            status = "unknown"
-        self.rotation_backend_text.set(f"Rotation backend: {status}")
+    #     if hasattr(self.player.sh, "get_rotation_backend_status"):
+    #         status = self.player.sh.get_rotation_backend_status()
+    #     else:
+    #         status = "unknown"
+    #     self.rotation_backend_text.set(f"Rotation backend: {status}")
 
     def _handle_error(self, title, error):
         message = str(error)
@@ -684,6 +690,12 @@ class AudioPlayerGUI:
 
                 if message_type == "success":
                     result = payload
+
+                    # if already a player was loaded, discard the old one before loading the new one
+                    if self.has_loaded_player():
+                        print(f"Closing the old player before assigning the new one.")
+                        self.player.close()
+
                     self.player = result["player"]
 
                     file_name = os.path.basename(result["path"])
@@ -695,12 +707,13 @@ class AudioPlayerGUI:
                     self.output_type.set("Output: binaural streaming")
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
                     self.playback_status.set("Status: Loaded")
+                    self.playback_status_label.configure(foreground="black")
                     self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
 
                     self.reset_progress_display()
                     self.update_rotation_label()
                     self.update_loaded_settings(result)
-                    self.update_rotation_backend_status()
+                    #self.update_rotation_backend_status()
                     self.set_loading(False)
                     self.update_info()
                 else:
@@ -870,10 +883,13 @@ class AudioPlayerGUI:
         self.apply_rotation()
 
     def apply_orientation_to_audio(self, orientation):
-        self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
+        if self.has_loaded_player():
+            self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
 
     def start_demo_tracking(self):
         self.tracking_mode.set("Demo")
+
+        # start demo tracker
         self.demo_tracker.start()
         self.tracking_status.set("Tracking: Demo running")
         self.playback_status.set("Status: Demo tracking")
@@ -902,11 +918,7 @@ class AudioPlayerGUI:
             self.update_rotation_label()
             self.draw_head_tracking_visualizer(orientation)
 
-            if self.has_rotation_audio_backend():
-                self.apply_orientation_to_audio(orientation)
-                self.tracking_status.set("Tracking: Demo running, audio rotation active")
-            else:
-                self.tracking_status.set("Tracking: Demo running, visualizer only")
+            self.apply_orientation_to_audio(orientation)
 
         self.root.after(50, self.update_head_tracking_loop)
 
@@ -961,7 +973,7 @@ class AudioPlayerGUI:
             f"HRTF: {self.hrtf_path_value.get()}\n"
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_text.get()}\n"
-            f"{self.rotation_backend_text.get()}\n"
+            #f"{self.rotation_backend_text.get()}\n"
             f"{self.tracking_status.get()}\n"
             f"{self.tracking_angles.get()}\n"
             f"{self.loaded_settings_text.get()}\n\n"
@@ -1019,8 +1031,9 @@ class AudioPlayerGUI:
         self.stop_head_tracking(reset_orientation=False)
         if self.has_player():
             try:
-                self.player.stop()
+                self.player.close()
             except Exception:
+                print("Player didn't close cleanly!")
                 pass
         self.root.destroy()
 

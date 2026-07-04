@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pythonosc.udp_client import SimpleUDPClient
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
+from shroom.utils.rotation_utils import wigner_d_matrix
+from scipy.spatial.transform import Rotation
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ class DemoHeadTracker:
             return self.orientation_state.get()
 
         elapsed = time.perf_counter() - self._start_time
-        phase = 2.0 * math.pi * elapsed / self.period
+        phase = (2.0 * math.pi * elapsed / self.period) * 0.3
         yaw = self.yaw_amplitude * math.sin(phase)
         pitch = self.pitch_amplitude * math.sin(phase * 0.5)
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
