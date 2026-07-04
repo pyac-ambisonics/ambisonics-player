@@ -5,5 +5,5 @@ soundfile
 pyfar
 spharpy
 pooch
-shroom
+pyshroom
 python-osc
