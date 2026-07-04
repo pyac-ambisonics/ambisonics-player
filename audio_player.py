@@ -157,8 +157,8 @@ class AudioPlayer:
                 else:
                     # queue None-item as flag that playback has ended
                     self.audio_queue.put(None)
-                    # call stop to cleanup everything.
-                    self.stop()
+                    # clear the play event
+                    self.play_event.clear()
 
     # process a single chunk of data, performing an overlap-add algorithm
     def _process_chunk(self, chunk):
@@ -322,7 +322,7 @@ class AudioPlayer:
 
         # If stream exists but is not playing, close it first
         if self.stream is not None:
-            self.stop(reset_position=False)
+            self.stop()
 
         # reset stop and pause flags
         self.stop_event.clear()

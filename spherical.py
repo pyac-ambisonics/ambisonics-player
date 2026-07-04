@@ -155,7 +155,7 @@ class SphericalHarmonics:
         *_, n_samples = self.hrir_nm.shape
         return n_samples
     
-    def update_rotation_matrix(self, angles, convention='xyz'):
+    def update_rotation_matrix(self, angles, convention='zyx'):
         """
         Directly Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx). This will block the thread!
         The updating is done in a thread-safe manner.
@@ -163,7 +163,7 @@ class SphericalHarmonics:
         Parameters
         ----------
         angles : sequence of float
-            Euler angles in degrees as (x, y, z).
+            Euler angles in degrees as (z, y, x).
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
@@ -183,7 +183,7 @@ class SphericalHarmonics:
             self._D = new_D
             self.hrir_nm_rot = new_rot
 
-    def set_rotation(self, angles, convention='xyz'):
+    def set_rotation(self, angles, convention='zyx'):
         """
         Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx) by passing it to the worker thread.
         The updating is done in a thread-safe manner.
@@ -191,7 +191,7 @@ class SphericalHarmonics:
         Parameters
         ----------
         angles : sequence of float
-            Euler angles in degrees as (x, y, z).
+            Euler angles in degrees as (z, y, x).
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
