@@ -76,7 +76,7 @@ class DemoHeadTracker:
     def _tracking_loop(self):
         while self._running:
             elapsed = time.perf_counter() - self._start_time
-            phase = 2 * math.pi * elapsed / self.period
+            phase = (2 * math.pi * elapsed / self.period) * 0.3
             yaw = self.yaw_amplitude * math.sin(phase)
             pitch = self.pitch_amplitude * math.sin(phase * 0.5)
             self.orientation_state.set(

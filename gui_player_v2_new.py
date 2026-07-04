@@ -73,6 +73,7 @@ class AudioPlayerGUI:
         self.orientation_state = OrientationState()
         self.demo_tracker = DemoHeadTracker(self.orientation_state)
         self.head_tracker = HeadTracker(self.orientation_state)
+        self.rotation_tracker = self.demo_tracker
         self.yaw_value = tk.DoubleVar(value=0.0)
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
@@ -892,16 +893,36 @@ class AudioPlayerGUI:
         if self.has_loaded_player():
             self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
 
-    def start_demo_tracking(self):
-        self.tracking_mode.set("Demo")
-        self.demo_tracker.start()
-        self.tracking_status.set("Tracking: Demo running")
-        self.playback_status.set("Status: Demo tracking")
+    def start_head_tracking(self):
+        # if rotation tracker is running, stop it first before startin again
+        if self.rotation_tracker.is_running():
+            # make sure we don't forget the current tracking mode
+            tracking_mode = self.tracking_mode.get()
+            self.stop_head_tracking()
+            self.tracking_mode.set(tracking_mode)
+
+        match self.tracking_mode.get():
+            case "Demo":
+                self.rotation_tracker = self.demo_tracker
+            case "Hardware":
+                try:
+                    self.rotation_tracker = self.head_tracker
+                except Exception as e:
+                    print("Something went wrong: " + e)
+            case "Off":
+                return
+            
+        self.rotation_tracker.start()
+        
+        if self.tracking_mode.get is "Hardware" and self.rotation_tracker.is_running():
+            # should only do this on successful start ....
+            self.zero_tracker_button["state"] = "normal"
+
+        self.tracking_status.set("Tracking: " + self.tracking_mode.get() + " running")
+        self.playback_status.set("Status: " + self.tracking_mode.get() + " tracking")
 
     def stop_head_tracking(self, reset_orientation=True):
-        # !stop both trackers without checking which one is running - might need optimisation
-        self.demo_tracker.stop()
-        self.head_tracker.stop()
+        self.rotation_tracker.stop()
         self.zero_tracker_button["state"] = "disabled"
         self.tracking_mode.set("Off")
         self.tracking_status.set("Tracking: Off")
@@ -918,33 +939,15 @@ class AudioPlayerGUI:
 
     def update_head_tracking_loop(self):
         # !query both trackers for orientation - inefficient code!
-        if self.head_tracker.is_running():
-            orientation = self.head_tracker.orientation_state.get()
+        if self.rotation_tracker.is_running():
+            orientation = self.rotation_tracker.orientation_state.get()
+        
             self.yaw_value.set(orientation.yaw)
             self.pitch_value.set(orientation.pitch)
             self.roll_value.set(orientation.roll)
+
             self.update_rotation_label()
             self.draw_head_tracking_visualizer(orientation)
-
-
-        if self.demo_tracker.is_running():
-            orientation = self.demo_tracker.sample()
-            self.yaw_value.set(orientation.yaw)
-            self.pitch_value.set(orientation.pitch)
-            self.roll_value.set(orientation.roll)
-            self.update_rotation_label()
-            self.draw_head_tracking_visualizer(orientation)
-
-            self.apply_orientation_to_audio(orientation)
-
-        if self.demo_tracker.is_running():
-            orientation = self.demo_tracker.orientation_state.get()
-            self.yaw_value.set(orientation.yaw)
-            self.pitch_value.set(orientation.pitch)
-            self.roll_value.set(orientation.roll)
-            self.update_rotation_label()
-            self.draw_head_tracking_visualizer(orientation)
-
             self.apply_orientation_to_audio(orientation)
 
         self.root.after(50, self.update_head_tracking_loop)
