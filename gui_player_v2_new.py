@@ -2,7 +2,6 @@ import math
 import os
 import threading
 import traceback
-import mido
 import tkinter as tk
 from pathlib import Path
 from queue import Queue
@@ -14,6 +13,11 @@ from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
+
+try:
+    import mido
+except ModuleNotFoundError:
+    mido = None
 
 
 class AudioPlayerGUI:
@@ -74,20 +78,21 @@ class AudioPlayerGUI:
         self.demo_tracker = DemoHeadTracker(self.orientation_state)
         self.head_tracker = HeadTracker(self.orientation_state)
         self.rotation_tracker = self.demo_tracker
+        self.head_tracker_devices = []
+        self.midi_error = ""
         self.yaw_value = tk.DoubleVar(value=0.0)
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
-        #self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
-        self.rotation_note = tk.StringVar(
-            value="Hardware tracking is " + ("not " if not any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) else "") + "available."
-        )
+        self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
+        self.rotation_note = tk.StringVar(value="Hardware tracking status: not checked.")
         self.tracking_mode = tk.StringVar(value="Off")
         self.tracking_status = tk.StringVar(value="Tracking: Off")
         self.tracking_angles = tk.StringVar(value="Yaw 0.0 | Pitch 0.0 | Roll 0.0")
 
         self.setup_style()
         self.create_widgets()
+        self.refresh_hardware_tracking_status(show_message=False)
         self.set_controls_enabled(False)
         self.root.after(100, self._process_backend_load_queue)
         self.root.after(250, self.update_gui_loop)
@@ -418,24 +423,31 @@ class AudioPlayerGUI:
         self.tracking_mode_box = ttk.Combobox(
             card,
             textvariable=self.tracking_mode,
-            values=["Off", "Hardware", "Demo"],
+            values=self.get_tracking_modes(),
             state="readonly",
             width=10,
         )
         self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(16, 0))
 
+        self.refresh_tracker_button = ttk.Button(
+            card,
+            text="Refresh Devices",
+            command=self.refresh_hardware_tracking_status,
+        )
+        self.refresh_tracker_button.grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(16, 0))
+
         self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", command=self.head_tracker.zero)
-        self.zero_tracker_button.grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.zero_tracker_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
         self.zero_tracker_button["state"] = "disabled"
 
         self.start_tracking_button = ttk.Button(card, text="Start Tracking", command=self.start_head_tracking)
-        self.start_tracking_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.start_tracking_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
 
         self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
-        self.stop_tracking_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.stop_tracking_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(16, 0))
 
         ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
-            row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0)
+            row=6, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(14, 0)
         )
 
         self.tracking_canvas = tk.Canvas(
@@ -449,7 +461,7 @@ class AudioPlayerGUI:
         self.tracking_canvas.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
-            row=6, column=2, columnspan=4, sticky="e", padx=(18, 0), pady=(14, 0)
+            row=6, column=4, columnspan=2, sticky="e", padx=(18, 0), pady=(14, 0)
         )
 
         self.draw_head_tracking_visualizer(self.orientation_state.get())
@@ -458,6 +470,44 @@ class AudioPlayerGUI:
         card.columnconfigure(2, weight=0)
         card.columnconfigure(3, weight=0)
         card.columnconfigure(4, weight=0)
+
+    def get_tracking_modes(self):
+        modes = ["Off"]
+        if self.head_tracker.is_available() and self.head_tracker_devices:
+            modes.append("Hardware")
+        modes.append("Demo")
+        return modes
+
+    def refresh_hardware_tracking_status(self, show_message=True):
+        self.head_tracker_devices = []
+        self.midi_error = ""
+
+        if not self.head_tracker.is_available():
+            self.rotation_note.set("Hardware tracking unavailable: pyheadtracker is not installed.")
+        elif mido is None:
+            self.rotation_note.set("Hardware tracking unavailable: mido is not installed.")
+        else:
+            try:
+                names = mido.get_input_names()
+                self.head_tracker_devices = [name for name in names if "Head Tracker" in name]
+                if self.head_tracker_devices:
+                    self.rotation_note.set(
+                        "Hardware tracking available: " + ", ".join(self.head_tracker_devices)
+                    )
+                else:
+                    self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
+            except Exception as error:
+                self.midi_error = str(error)
+                self.rotation_note.set(f"Hardware tracking check failed: {self.midi_error}")
+
+        if hasattr(self, "tracking_mode_box"):
+            modes = self.get_tracking_modes()
+            self.tracking_mode_box.configure(values=modes)
+            if self.tracking_mode.get() not in modes:
+                self.tracking_mode.set("Off")
+
+        if show_message:
+            self.update_info()
 
     def create_rotation_slider(self, parent, label, variable, row):
         ttk.Label(parent, text=label, background="white", font=("Arial", 10, "bold")).grid(
@@ -633,16 +683,16 @@ class AudioPlayerGUI:
             f"headphone {result['headphone']}"
         )
 
-    # def update_rotation_backend_status(self):
-    #     if not self.has_loaded_player():
-    #         self.rotation_backend_text.set("Rotation backend: not loaded")
-    #         return
+    def update_rotation_backend_status(self):
+        if not self.has_loaded_player():
+            self.rotation_backend_text.set("Rotation backend: not loaded")
+            return
 
-    #     if hasattr(self.player.sh, "get_rotation_backend_status"):
-    #         status = self.player.sh.get_rotation_backend_status()
-    #     else:
-    #         status = "unknown"
-    #     self.rotation_backend_text.set(f"Rotation backend: {status}")
+        if hasattr(self.player.sh, "get_rotation_backend_status"):
+            status = self.player.sh.get_rotation_backend_status()
+        else:
+            status = "unknown"
+        self.rotation_backend_text.set(f"Rotation backend: {status}")
 
     def _handle_error(self, title, error):
         message = str(error)
@@ -884,7 +934,7 @@ class AudioPlayerGUI:
                     self.reset_progress_display()
                     self.update_rotation_label()
                     self.update_loaded_settings(result)
-                    #self.update_rotation_backend_status()
+                    self.update_rotation_backend_status()
                     self.set_loading(False)
                     self.update_info()
 
@@ -905,7 +955,7 @@ class AudioPlayerGUI:
                     self.reset_progress_display()
                     self.update_rotation_label()
                     self.update_loaded_settings(result)
-                    #self.update_rotation_backend_status()
+                    self.update_rotation_backend_status()
                     self.set_loading(False)
                     # make sure decoder settings are disabled if we only updated the decoder, because this only gets called on a play
                     self.set_decoder_settings_enabled(False)
@@ -1093,6 +1143,8 @@ class AudioPlayerGUI:
             self.player.sh.set_rotation([orientation.yaw, orientation.pitch, orientation.roll])
 
     def start_head_tracking(self):
+        self.refresh_hardware_tracking_status(show_message=False)
+
         # if rotation tracker is running, stop it first before startin again
         if self.rotation_tracker.is_running():
             # make sure we don't forget the current tracking mode
@@ -1104,16 +1156,30 @@ class AudioPlayerGUI:
             case "Demo":
                 self.rotation_tracker = self.demo_tracker
             case "Hardware":
+                if "Hardware" not in self.get_tracking_modes():
+                    self.tracking_status.set("Tracking: Hardware unavailable")
+                    messagebox.showwarning(
+                        "Head Tracking",
+                        "No supported hardware tracker is available. Use Demo tracking instead.",
+                    )
+                    return
                 try:
                     self.rotation_tracker = self.head_tracker
                 except Exception as e:
-                    print("Something went wrong: " + e)
+                    print(f"Something went wrong: {e}")
             case "Off":
                 return
-            
-        self.rotation_tracker.start()
+
+        try:
+            self.rotation_tracker.start()
+        except Exception as error:
+            self.tracking_status.set("Tracking: failed to start")
+            print(f"[Head Tracking Error] {error}")
+            traceback.print_exc()
+            messagebox.showerror("Head Tracking Error", str(error))
+            return
         
-        if self.tracking_mode.get == "Hardware" and self.rotation_tracker.is_running():
+        if self.tracking_mode.get() == "Hardware" and self.rotation_tracker.is_running():
             # should only do this on successful start ....
             self.zero_tracker_button["state"] = "normal"
 
@@ -1187,9 +1253,12 @@ class AudioPlayerGUI:
                 f"Selected order: {self.order_value.get()}\n"
                 f"Block size: {self.block_size_value.get()} samples\n"
                 f"HRTF: {self.hrtf_path_value.get()}\n"
-                f"Headphone filter: {self.headphone_value.get()}\n"
-                f"{self.loaded_settings_text.get()}\n"
-            )
+            f"Headphone filter: {self.headphone_value.get()}\n"
+            f"{self.rotation_note.get()}\n"
+            f"{self.rotation_backend_text.get()}\n"
+            f"Detected head trackers: {self.format_head_tracker_devices()}\n"
+            f"{self.loaded_settings_text.get()}\n"
+        )
 
         return (
             f"{self.player.get_info_text()}\n\n"
@@ -1202,15 +1271,23 @@ class AudioPlayerGUI:
             f"HRTF: {self.hrtf_path_value.get()}\n"
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_text.get()}\n"
-            #f"{self.rotation_backend_text.get()}\n"
+            f"{self.rotation_note.get()}\n"
+            f"{self.rotation_backend_text.get()}\n"
+            f"Detected head trackers: {self.format_head_tracker_devices()}\n"
             f"{self.tracking_status.get()}\n"
             f"{self.tracking_angles.get()}\n"
             f"{self.loaded_settings_text.get()}\n\n"
             "Notes:\n"
-            "Manual rotation updates the SH rotation matrix when the rotation backend is available. "
-            "Hardware head tracking still needs a separate tracker thread before it should be "
-            "enabled for demos."
+            "Manual rotation and Demo tracking are available for presentations. "
+            "Hardware tracking is enabled only when a supported tracker is detected."
         )
+
+    def format_head_tracker_devices(self):
+        if self.head_tracker_devices:
+            return ", ".join(self.head_tracker_devices)
+        if self.midi_error:
+            return f"none ({self.midi_error})"
+        return "none"
 
     def write_info_text(self, text):
         self.info_text.configure(state="normal")
