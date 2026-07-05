@@ -3,16 +3,13 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-from scipy import signal as sgn
 from hrtf import HRTF, Processing
 from scipy.spatial.transform import Rotation
 import utils
 import time
-
-try:
-    from shroom.utils.rotation_utils import wigner_d_matrix
-except ModuleNotFoundError:
-    wigner_d_matrix = None
+from shroom.utils.rotation_utils import wigner_d_matrix
+import threading
+import queue
 
 class SphericalHarmonics:
     """
@@ -119,14 +116,62 @@ class SphericalHarmonics:
 
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
-        self.D = None
-        self.rotation_backend_available = wigner_d_matrix is not None
-        self._warned_rotation_fallback = False
-        self._apply_rotation([0, 0, 0])
+        self._D = None
+        self._last_rotation = Rotation.from_euler('xyz', (0, 0, 0))
+        self.atol = np.deg2rad(2)
+
+        self._rotation_lock = threading.Lock()
+        self._rotation_queue = queue.Queue(maxsize=1)
+        self._rotation_update = threading.Event()
+        self._stop_rotation_thread = threading.Event()
+
+        # start the rotation thread
+        self._rotation_thread = threading.Thread(
+            target=self._rotation_worker,
+            daemon=True,
+        )
+        self._rotation_thread.start()
+        
+        # use this function because we will not calculate D otherwise
+        self.update_rotation_matrix([0, 0, 0])
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self._find_gain()
 
+    def update_order(self, order: int):
+        # create a spherical harmonics definition, corresponding to the AmbiX convention
+        self.ambi_order = order
+        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, 
+                                                            normalization="SN3D", 
+                                                            basis_type='real', 
+                                                            condon_shortley=False
+                                                            )
+
+        # create the spherical harmonics object from definition and sampling sphere
+        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
+                                                                         self.sources, 
+                                                                         inverse_method="pseudo_inverse"
+                                                                         )
+        # create h_nm matrix 
+        hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
+                                               self.spherical_harmonics,
+                                               algorithm='MagLS'
+                                               )
+        
+        # update our hrir_nm
+        self.hrir_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
+                                                                   hrirs_nm.time, 
+                                                                   hrirs_nm.sampling_rate
+                                                                   ).time
+        
+        # prepare hrir_nm_fft
+        self.update_hrirs_fft()
+
+        # prepare pre_gain for gianstaging
+        self.pre_gain = self._find_gain()
+        
+
+        
     def get_IR_length(self):
         """
         Return the impulse-response length (number of samples) of the current HRIRs.
@@ -139,68 +184,135 @@ class SphericalHarmonics:
         *_, n_samples = self.hrir_nm.shape
         return n_samples
     
-    def set_rotation(self, angles):
+    def update_rotation_matrix(self, angles, convention='zyx'):
         """
-        Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx).
+        Directly Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx). This will block the thread!
+        The updating is done in a thread-safe manner.
 
         Parameters
         ----------
         angles : sequence of float
             Euler angles in degrees as (z, y, x).
+        convention : str
+            A string identifying the used convention/order of the angles. 'zyx' is default.
         """
-        self._update_rotation_matrix(angles)
-
-    def _update_rotation_matrix(self, angles):
-        if wigner_d_matrix is None:
-            if not self._warned_rotation_fallback:
-                print("shroom.utils.rotation_utils is not available. Rotation is disabled.")
-                self._warned_rotation_fallback = True
-            channels = utils.order_to_channel_n(self.ambi_order)
-            self.D = np.eye(channels)
-            return
-
-        rotation = Rotation.from_euler("zyx", angles, degrees=True)
+        rotation = Rotation.from_euler(convention, angles, degrees=True)
         alpha, beta, gamma = rotation.as_euler("zyz")
-        self.D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+        new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
-    def has_rotation_backend(self):
-        return self.rotation_backend_available
-
-    def get_rotation_backend_status(self):
-        if self.rotation_backend_available:
-            return "available"
-        return "fallback identity (audio rotation disabled)"
-
-    # set the current rotation angle
-    def _apply_rotation(self, angles=None):
-        """
-        Applies rotation to to the base SH coefficients in frequency domain. Thus, the already zero-padded
-        signal is used, because that is what the frequency domain data is based on. Updates the internal state
-        of hrir_nm_rot. If angles are given, updates the internal state of the wigner-D matrix D.
-
-        Parameters
-        ----------
-        angles : sequence of float, optional
-            Euler angles in degrees as (z, y, x).
-            If no angles are given, uses the last available internally stored angles.
-            If angles are given, updates the internally stored angles.
-        """
-        # update the wigner D matrix if angles were given
-        if angles is not None:
-            self._update_rotation_matrix(angles)
-        elif self.D is None:
-            self._update_rotation_matrix([0, 0, 0])
-        
-        # using the fft, since we expect this to be faster than time domain
-        hrir_rot = self.hrir_nm_fft.copy()
-
+         # using the fft, since we expect this to be faster than time domain
         # 3. Apply rotation
         # data is (Channels, SH, Time/Freq)
         # D is (SH, SH)
         # We want D @ data
         # einsum: ij, cjk -> cik
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
-        self.hrir_nm_rot = self.D @ hrir_rot
+        new_rot = new_D @ self.hrir_nm_fft
+        with self._rotation_lock:
+            self._D = new_D
+            self.hrir_nm_rot = new_rot
+
+    def set_rotation(self, angles, convention='zyx'):
+        """
+        Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx) by passing it to the worker thread.
+        The updating is done in a thread-safe manner.
+
+        Parameters
+        ----------
+        angles : sequence of float
+            Euler angles in degrees as (z, y, x).
+        convention : str
+            A string identifying the used convention/order of the angles. 'zyx' is default.
+        """
+        try:
+            self._rotation_queue.put_nowait((angles, convention))
+            print("Putting the newest Rotation in!")
+        except queue.Full:
+            try:
+                # drop the last cached block. queue should be empty now, since we only have size 1
+                self._rotation_queue.get_nowait()
+                print("Queue is already full! Dropping this")
+            except queue.Empty:
+                pass
+            # try putting a new block into the queue again after draining it
+            self._rotation_queue.put_nowait((angles, convention))
+            print("Putting the newest Rotation in!")
+
+        # finally, set the flag if we managed to successfully set a rotation
+        self._rotation_update.set()
+
+    def _rotation_worker(self):
+        """
+        A function continously updating the Wigner-D matrix. Called in a seperate thread from __init__
+        """
+        while not self._stop_rotation_thread.is_set():
+
+            # sleep cheaply until something happens. this blocks!
+            self._rotation_update.wait()
+            # clear the update flag and consume the current angles and convention
+            self._rotation_update.clear()
+
+            # get pending angles and rotation
+            try:
+                angles, convention = self._rotation_queue.get_nowait()
+                print("Consuming the newest Rotation!")
+            except queue.Empty:
+                continue
+
+            rotation = Rotation.from_euler(convention, angles, degrees=True)
+            # skip this calculation if no meaningful rotation has happened
+            if rotation.approx_equal(self._last_rotation, atol=self.atol):
+                print("Dropping this rotation, too close to last one!")
+                continue
+
+            # update the last rotation
+            self._last_rotation = rotation
+            # compute wigner D matrix
+            alpha, beta, gamma = rotation.as_euler("zyz")
+            new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+    
+            # using the fft, since we expect this to be faster than time domain
+            # 3. Apply rotation
+            # data is (Channels, SH, Time/Freq)
+            # D is (SH, SH)
+            # We want D @ data
+            # einsum: ij, cjk -> cik
+            # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
+            new_rot = new_D @ self.hrir_nm_fft
+            with self._rotation_lock:
+                self._D = new_D
+                self.hrir_nm_rot = new_rot
+                
+
+    def get_rotation_matrix(self):
+        """
+        Returns a copy fo the currently stored Wigner D matrix in a thread safe manner.
+        Returns None if no new rotation matrix is available.
+        """
+        with self._rotation_lock:
+            if self._D is None:
+                return None
+            
+            return self._D.copy()
+
+    # set the current rotation angle
+    def _apply_rotation(self):
+        """
+        Applies rotation to to the base SH coefficients in frequency domain. Thus, the already zero-padded
+        signal is used, because that is what the frequency domain data is based on. Updates the internal state
+        of hrir_nm_rot. 
+        """
+        # using the fft, since we expect this to be faster than time domain
+        # 3. Apply rotation
+        # data is (Channels, SH, Time/Freq)
+        # D is (SH, SH)
+        # We want D @ data
+        # einsum: ij, cjk -> cik
+        # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
+        D = self.get_rotation_matrix()
+        if D is not None:
+            # using the fft, since we expect this to be faster than time domain
+            self.hrir_nm_rot = D @ self.hrir_nm_fft
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
@@ -315,7 +427,8 @@ class SphericalHarmonics:
         # check for correct gain also elsewhere!
 
         # apply rotation to the sh_hrir
-        self._apply_rotation()
+        # not needed, we only apply rotation and update hrir_nm_rot on a new rotation
+        # self._apply_rotation()
 
         # sh_hrir should have the shape (2, ambi_channels, n bins)
         #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
@@ -329,6 +442,7 @@ class SphericalHarmonics:
 
         for ear in range(2):
             # perform convolution in rotated frequency domain and sum in frequency domain
+            #with self._rotation_lock:
             fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
         
         # Sum over channels -> single‑channel binaural signals
@@ -345,6 +459,7 @@ class SphericalHarmonics:
     def update_hrirs_fft(self, block_size: int):
         """
         Compute and store FFTs of the spherical-harmonic HRIRs zero-padded to block_size.
+        Additionally, recalculates the current rotation matrix to fit the necessary size
         
         Parameters
         ----------------
@@ -352,6 +467,21 @@ class SphericalHarmonics:
             FFT length used for convolution; HRIRs are zero-padded to this length.
         """
         self.hrir_nm_fft = np.fft.fft(self.hrir_nm, n=block_size, axis=-1)
+        self._apply_rotation()
+
+    def close(self):
+        """
+        Cleans up this file so it can close correctly
+        """
+        self._stop_rotation_thread.set()
+
+        # terminate the rotation_thread
+        if self._rotation_thread is not None:
+            self._rotation_thread.join(timeout=1.0)
+
+            # debug message if processing_thread didn't terminate properly
+            if self._rotation_thread.is_alive():
+                print("Warning: Rotation thread did not terminate cleanly.")
     
     # find a good gain to apply to the stereo signal, based on the ambisonics order
     def _find_gain(self):
@@ -413,3 +543,14 @@ class SphericalHarmonics:
                 "WARNING! WARNING" \
                 "clipping detected!\n" \
                 "####################")
+
+    def set_atol(self, atol):
+        """
+        Sets the tolerance for which we accept rotation updates. Default tolerance is 2°.
+
+        Parameters
+        ----------
+        atol : int
+            The tolerance in degrees.
+        """
+        self.atol = np.deg2rad(atol)
