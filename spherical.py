@@ -3,7 +3,6 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-from scipy import signal as sgn
 from hrtf import HRTF, Processing
 from scipy.spatial.transform import Rotation
 import utils
@@ -11,10 +10,6 @@ import time
 from shroom.utils.rotation_utils import wigner_d_matrix
 import threading
 import queue
-import cProfile
-import pstats
-import io
-from contextlib import redirect_stdout
 
 class SphericalHarmonics:
     """
@@ -143,6 +138,40 @@ class SphericalHarmonics:
         # prepare pre_gain for gianstaging
         self.pre_gain = self._find_gain()
 
+    def update_order(self, order: int):
+        # create a spherical harmonics definition, corresponding to the AmbiX convention
+        self.ambi_order = order
+        self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, 
+                                                            normalization="SN3D", 
+                                                            basis_type='real', 
+                                                            condon_shortley=False
+                                                            )
+
+        # create the spherical harmonics object from definition and sampling sphere
+        self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
+                                                                         self.sources, 
+                                                                         inverse_method="pseudo_inverse"
+                                                                         )
+        # create h_nm matrix 
+        hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
+                                               self.spherical_harmonics,
+                                               algorithm='MagLS'
+                                               )
+        
+        # update our hrir_nm
+        self.hrir_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
+                                                                   hrirs_nm.time, 
+                                                                   hrirs_nm.sampling_rate
+                                                                   ).time
+        
+        # prepare hrir_nm_fft
+        self.update_hrirs_fft()
+
+        # prepare pre_gain for gianstaging
+        self.pre_gain = self._find_gain()
+        
+
+        
     def get_IR_length(self):
         """
         Return the impulse-response length (number of samples) of the current HRIRs.

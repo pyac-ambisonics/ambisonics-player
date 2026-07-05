@@ -62,7 +62,7 @@ class AudioPlayer:
         self.overlap_buffer = None 
         # overlap add L
         self.sh_length = None
-        # overlap add M
+        # overlap add M. needs to be updated if chunk_size gets updated
         self.block_size = ambi_file.get_chunk_size()
         # overlap add N
         self.N = None

@@ -2,7 +2,6 @@ import math
 import os
 import threading
 import traceback
-import time
 import mido
 import tkinter as tk
 from pathlib import Path
@@ -68,6 +67,7 @@ class AudioPlayerGUI:
         self.decoder_note = tk.StringVar(
             value="Order, block size, HRTF, and headphone filter are applied when loading a file."
         )
+        self.update_event = threading.Event()
 
         # Rotation and head tracking demo state
         self.orientation_state = OrientationState()
@@ -496,6 +496,16 @@ class AudioPlayerGUI:
         self.headphone_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.hrtf_button.configure(state=tk.NORMAL if enabled else tk.DISABLED)
 
+    def _normalize_hrtf_path(self, path):
+        if path in (None, "", "Default FABIAN HRTF"):
+            return None
+
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.app_dir / candidate
+
+        return str(candidate.resolve())
+
     def unlock_decoder_settings(self):
         self.set_decoder_settings_enabled(True)
         self.decoder_note.set("Settings unlocked. Click Load AmbiX File again to apply changes.")
@@ -515,7 +525,7 @@ class AudioPlayerGUI:
         else:
             self.loading_text.set("")
             self.ambix_button.configure(state=tk.NORMAL)
-            self.set_decoder_settings_enabled(not self.has_loaded_player())
+            self.set_decoder_settings_enabled(self.has_loaded_player())
             self.set_controls_enabled(self.has_loaded_player())
 
         self.root.update_idletasks()
@@ -593,6 +603,7 @@ class AudioPlayerGUI:
         message = str(error)
         print(f"[{title}] {message}")
         traceback.print_exc()
+        self.stop()
         messagebox.showerror(title, message)
 
     # ==============================================================
@@ -614,7 +625,8 @@ class AudioPlayerGUI:
         if self.has_player():
             try:
                 self.player.stop()
-            except Exception:
+            except Exception as e:
+                print(e)
                 pass
         self.stop_head_tracking(reset_orientation=False)
 
@@ -624,6 +636,7 @@ class AudioPlayerGUI:
         self.output_type.set("Output: preparing binaural stream")
         self.pipeline_status.set("Pipeline: loading AmbiX and preparing decoder")
         self.playback_status.set("Status: Loading")
+        self.playback_status_label.configure(foreground="red")
         self.write_info_text(self.build_info_text())
 
         order = self.get_order()
@@ -677,7 +690,7 @@ class AudioPlayerGUI:
                     "headphone": headphone,
                     "hrtf": hrtf_file,
                 }
-                self._backend_load_queue.put(("success", result))
+                self._backend_load_queue.put(("new_load", result))
             except Exception as error:
                 traceback.print_exc()
                 self._backend_load_queue.put(("error", str(error)))
@@ -690,12 +703,118 @@ class AudioPlayerGUI:
             daemon=True,
         ).start()
 
+    def update_decoder_settings(self):
+
+        # try to find any changes to the decoder settings. if so, update all necessary attributes in player.
+        # get current values
+        requested_order = self.get_order()
+        requested_block_size = self.get_block_size()
+        requested_hp = self.headphone_value.get()
+        requested_hrtf = self.get_selected_hrtf_path()
+
+        if requested_hp in (None, "", "None"):
+            requested_hp = None
+
+        # lock decoder settings and playback buttons
+        # put a text that informs the user why everything is disabled
+        self.set_loading(True, "Processing new decoder values. Controls are disabled.")
+
+        self.update_event.clear()
+
+        # the worker thread setting up all new variables
+        def update_decoder(new_hrtf=None, new_hp=None, new_block_size=None, new_order=None):
+            try: 
+                player = self.player
+                if player is None:
+                    raise RuntimeError("No player loaded.")
+                
+                current_hrtf = self._normalize_hrtf_path(getattr(player.sh.hrtf, "path", None))
+                current_hp = getattr(player.sh.hrtf, "current_filter", None)
+                current_block_size = player.ambi_file.get_chunk_size()
+                current_order = player.ambi_file.get_order()
+                
+                new_hrtf = self._normalize_hrtf_path(new_hrtf)
+                if new_hp in (None, "", "None"):
+                    new_hp = None
+
+                change = False
+                needs_rebuild = False
+
+                if new_hrtf is not None and new_hrtf != current_hrtf:
+                    print("Updating HRTF")
+                    # hrtf file changed
+                    self.player.sh.hrtf.path = Path(new_hrtf)
+                    player.sh.hrtf = HRTF(new_hrtf)
+                    change = True
+                    needs_rebuild = True
+
+                if new_hp != current_hp:
+                    print("Updating HP Filter")
+                    # hp filter changed
+                    # calculate new hp_filter
+                    self.player.sh.hrtf.load_hp_filter(new_hp)
+                    change = True
+                    needs_rebuild = True
+
+                if new_block_size is not None and new_block_size != current_block_size:
+                    print("Updating Block Size")
+                    # block size changed
+                    # update block size in ambi_file. player gets the updates automatically
+                    self.player.ambi_file.set_chunk_size(new_block_size)
+                    change = True
+
+                if new_order is not None and new_order != current_order:
+                    print("Updating Order")
+                    # order changed
+                    # set order in ambi file
+                    self.player.ambi_file.set_order(new_order)
+                    change = True
+                    needs_rebuild = True
+
+                if needs_rebuild:
+                    # rebuild our spherical harmonics
+                    new_sh = SphericalHarmonics(
+                        hrtf=player.sh.hrtf,
+                        sampling_rate=player.ambi_file.get_samplerate(),
+                        ambi_order=player.ambi_file.get_order(),
+                    )
+                    # cleanup old SH instance
+                    player.sh.close()
+                    player.sh = new_sh
+                    
+                if change:
+                    player._reset_process_variables()
+
+                result = {
+                    "order": player.ambi_file.get_order(),
+                    "channels": player.ambi_file.get_num_channels(),
+                    "sample_rate": player.ambi_file.get_samplerate(),
+                    "duration": player.ambi_file.get_duration(),
+                    "headphone": new_hp if new_hp is not None else current_hp,
+                    "hrtf": new_hrtf if new_hrtf is not None else current_hrtf,
+                }
+                self._backend_load_queue.put(("decoder_update", result))
+
+            except Exception as error:
+                traceback.print_exc()
+                self._backend_load_queue.put(("error", str(error)))
+            finally:
+                self.update_event.set()
+
+        # starting worker thread
+        threading.Thread(
+            target=update_decoder,
+            args=(requested_hrtf, requested_hp, requested_block_size, requested_order),
+            daemon=True,
+        ).start()
+
+
     def _process_backend_load_queue(self):
         try:
             while not self._backend_load_queue.empty():
                 message_type, payload = self._backend_load_queue.get_nowait()
 
-                if message_type == "success":
+                if message_type == "new_load":
                     result = payload
 
                     # if already a player was loaded, discard the old one before loading the new one
@@ -723,10 +842,35 @@ class AudioPlayerGUI:
                     #self.update_rotation_backend_status()
                     self.set_loading(False)
                     self.update_info()
+
+                elif message_type == "decoder_update":
+                    result = payload
+                    self.update_event.clear()
+
+                    self.input_type.set(
+                        f"Input type: AmbiX / order {result['order']} / "
+                        f"{result['channels']} channels"
+                    )
+                    self.output_type.set("Output: binaural streaming")
+                    self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
+                    self.playback_status.set("Status: Loaded")
+                    self.playback_status_label.configure(foreground="black")
+                    self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
+
+                    self.reset_progress_display()
+                    self.update_rotation_label()
+                    self.update_loaded_settings(result)
+                    #self.update_rotation_backend_status()
+                    self.set_loading(False)
+                    # make sure decoder settings are disabled if we only updated the decoder, because this only gets called on a play
+                    self.set_decoder_settings_enabled(False)
+                    self.update_info()
+
                 else:
                     self.set_loading(False)
                     self.pipeline_status.set("Pipeline: load failed")
                     self.playback_status.set("Status: Load failed")
+                    self.playback_status_label.configure(foreground="red")
                     self.set_controls_enabled(False)
                     self.update_info()
                     self._handle_error("load Error", payload)
@@ -741,7 +885,16 @@ class AudioPlayerGUI:
         if not self.has_loaded_player():
             return
         try:
+            self.update_decoder_settings()
+            # wait until any updates are done
+            self.update_event.wait()
+
+            # for safety
+            if not self.has_loaded_player():
+                return
+
             self.player.play()
+            self.set_decoder_settings_enabled(False)
             self.playback_status.set("Status: Playing")
             self.update_info()
         except Exception as error:
@@ -762,6 +915,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.stop()
+            self.set_decoder_settings_enabled(True)
             self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
             self.time_text.set(
@@ -914,7 +1068,7 @@ class AudioPlayerGUI:
             
         self.rotation_tracker.start()
         
-        if self.tracking_mode.get is "Hardware" and self.rotation_tracker.is_running():
+        if self.tracking_mode.get == "Hardware" and self.rotation_tracker.is_running():
             # should only do this on successful start ....
             self.zero_tracker_button["state"] = "normal"
 

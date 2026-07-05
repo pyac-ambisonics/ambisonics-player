@@ -16,7 +16,7 @@ import pyfar as pf
 import soundfile as sf
 
 from typing import Tuple, Optional, List
-from utils import ambix_channels_to_order
+from utils import ambix_channels_to_order, order_to_channel_n, next_power_of_two
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,20 @@ class AmbisonicsFile:
             self.format, num_channels, order_candidate,
         )
 
+    def set_order(self, order: int):
+        if order < 0:
+            raise ValueError("Order must be non-negative.")
+        
+        # make order lower if requested order is too high
+        if self.num_channels < order_to_channel_n(order):
+            # set to highest possible order instead
+            order = ambix_channels_to_order(self.num_channels)
+            print(f"Requested order too big for this file. Using highest possible order of {order} instead.")
+
+        self.order = order
+        self._validate_ambix_format()
+        self._setup_channel_layout(trim_extra_channels=True)
+
     # ==============================================================
     # Channel setup
     # ==============================================================
@@ -288,6 +302,12 @@ class AmbisonicsFile:
             self._current_position,
             self.chunk_size
         )
+
+        expected_channels = order_to_channel_n(self.order)
+
+        # make sure the chunk has the correct channel count for our order
+        if chunk.shape[1] > expected_channels:
+            chunk = chunk[:, :expected_channels]
 
         actual_samples = chunk.shape[0]
 
@@ -416,7 +436,7 @@ class AmbisonicsFile:
 
         # Round up to nearest power of two: 1 << (n - 1).bit_length()
         if chunk_size > 1:
-            chunk_size = 1 << (chunk_size - 1).bit_length()
+            chunk_size = next_power_of_two(chunk_size)
 
         return chunk_size
 

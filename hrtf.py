@@ -46,7 +46,7 @@ class HRTF:
         internet using `load_hrtf_from_web()`.
         """
         self.app_dir = Path(__file__).resolve().parent
-        self.path = self._resolve_path(path)
+        self.path = self.resolve_path(path)
 
         # load HRTF from files
         self.hrirs, self.sources = self.load_HRTF()
@@ -59,7 +59,10 @@ class HRTF:
         self.hp_list = [x.name for x in hp_subdir]
         self.hp_list.append("Diffuse Field Equalization")
 
-    def _resolve_path(self, path):
+        # store the current HP filter name
+        self.current_filter = None
+
+    def resolve_path(self, path):
         if path is None:
             return None
 
@@ -78,16 +81,26 @@ class HRTF:
 
         return candidate
 
-    def get_IR_length(self):
+    def get_IR_length(self, linear=False):
         """
         Return the number of samples in the loaded HRIRs.
+
+        Parameters
+        ------------
+        lineaer : bool, optional
+            If linear is True, the samplelength of the linear HRIR will be returned, isntead of the filtered HRIR.
+            Default is False.
         
         Returns
         -------------
         int
             Number of samples in self.hrirs.
         """
+        
         # returns the length of the HRTF impulse response
+        if linear:
+            return self.hrirs_linear.n_samples
+        
         return self.hrirs.n_samples
 
     def load_HRTF(self):
@@ -173,10 +186,12 @@ class HRTF:
 
         if name in (None, "", "None"):
             self.reset_hrirs()
+            self.current_filter = None
             return None
         
         # do Diffuse Field Equalization as default
         if name == "Diffuse Field Equalization":
+            self.current_filter = name
             return self.apply_dfe()
 
         path = self.hp_dir / name
@@ -199,7 +214,7 @@ class HRTF:
         
         # apply minimum phase conversion
         if min_phase:
-            desired_length = n_samples - self.get_IR_length()
+            desired_length = n_samples - self.get_IR_length(linear=True)
             # apply it before convolution to the hp_filter
             hp_filter = pf.dsp.minimum_phase(hp_filter)
 
@@ -213,6 +228,7 @@ class HRTF:
         # apply headphone filter to hrirs
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
         print(f"Samplelength of HRIR: {self.get_IR_length()}")
+        self.current_filter = name
         return hp_filter
     
     # sets hrirs to hrirs_linear
