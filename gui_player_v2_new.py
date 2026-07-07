@@ -1020,6 +1020,7 @@ class AudioPlayerGUI:
         volume = max(0.0, min(float(value), 1.0))
         # makes the volume slider feel more natural
         self.gain = volume**2.41
+        
         self.volume_display_value.set(f"{volume:.2f}")
 
         if not self.has_loaded_player():
