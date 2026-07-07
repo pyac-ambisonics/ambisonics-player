@@ -3,17 +3,13 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-from hrtf import HRTF, Processing
-from scipy.spatial.transform import Rotation
 import utils
 import time
 import threading
 import queue
-
-try:
-    from shroom.utils.rotation_utils import wigner_d_matrix
-except ModuleNotFoundError:
-    wigner_d_matrix = None
+from shroom.utils.rotation_utils import wigner_d_matrix
+from hrtf import HRTF, Processing
+from scipy.spatial.transform import Rotation
 
 class SphericalHarmonics:
     """
@@ -121,8 +117,6 @@ class SphericalHarmonics:
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self._D = None
-        self.rotation_backend_available = wigner_d_matrix is not None
-        self._warned_rotation_fallback = False
         self._last_rotation = Rotation.from_euler('xyz', (0, 0, 0))
         self.atol = np.deg2rad(2)
 
@@ -204,7 +198,9 @@ class SphericalHarmonics:
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
-        new_D = self._build_rotation_matrix(angles, convention)
+        rotation = Rotation.from_euler(convention, angles, degrees=True)
+        alpha, beta, gamma = rotation.as_euler("zyz")
+        new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
          # using the fft, since we expect this to be faster than time domain
         # 3. Apply rotation
@@ -217,26 +213,6 @@ class SphericalHarmonics:
         with self._rotation_lock:
             self._D = new_D
             self.hrir_nm_rot = new_rot
-
-    def _build_rotation_matrix(self, angles, convention='zyx'):
-        channels = utils.order_to_channel_n(self.ambi_order)
-        if wigner_d_matrix is None:
-            if not self._warned_rotation_fallback:
-                print("shroom.utils.rotation_utils is not available. Rotation uses identity fallback.")
-                self._warned_rotation_fallback = True
-            return np.eye(channels)
-
-        rotation = Rotation.from_euler(convention, angles, degrees=True)
-        alpha, beta, gamma = rotation.as_euler("zyz")
-        return wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
-
-    def has_rotation_backend(self):
-        return self.rotation_backend_available
-
-    def get_rotation_backend_status(self):
-        if self.rotation_backend_available:
-            return "available"
-        return "fallback identity (audio rotation disabled)"
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -296,7 +272,8 @@ class SphericalHarmonics:
             # update the last rotation
             self._last_rotation = rotation
             # compute wigner D matrix
-            new_D = self._build_rotation_matrix(angles, convention)
+            alpha, beta, gamma = rotation.as_euler("zyz")
+            new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
     
             # using the fft, since we expect this to be faster than time domain
             # 3. Apply rotation

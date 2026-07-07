@@ -2,12 +2,13 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-
-try:
-    import pyheadtracker as pht
-except ModuleNotFoundError:
-    pht = None
-
+import pyheadtracker as pht
+from dataclasses import dataclass
+from pythonosc.udp_client import SimpleUDPClient
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
+from shroom.utils.rotation_utils import wigner_d_matrix
+from scipy.spatial.transform import Rotation
 
 @dataclass(frozen=True)
 class Orientation:
@@ -108,16 +109,8 @@ class HeadTracker:
         self._thread = None
         self.ht = None
 
-    def is_available(self):
-        return pht is not None
-
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
     def start(self):
-        if pht is None:
-            raise RuntimeError(
-                "pyheadtracker is not installed. Install requirements or use Demo tracking."
-            )
-
         if self._running:
             return
         self.ht = pht.supperware.HeadTracker1(

@@ -3,6 +3,7 @@ import os
 import threading
 import traceback
 import tkinter as tk
+import mido
 from pathlib import Path
 from queue import Queue
 from tkinter import filedialog, messagebox
@@ -13,11 +14,6 @@ from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
-
-try:
-    import mido
-except ModuleNotFoundError:
-    mido = None
 
 
 class AudioPlayerGUI:
@@ -84,7 +80,7 @@ class AudioPlayerGUI:
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
-        self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
+        # self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(value="Hardware tracking status: not checked.")
         self.tracking_mode = tk.StringVar(value="Off")
         self.tracking_status = tk.StringVar(value="Tracking: Off")
@@ -482,23 +478,23 @@ class AudioPlayerGUI:
         self.head_tracker_devices = []
         self.midi_error = ""
 
-        if not self.head_tracker.is_available():
-            self.rotation_note.set("Hardware tracking unavailable: pyheadtracker is not installed.")
-        elif mido is None:
-            self.rotation_note.set("Hardware tracking unavailable: mido is not installed.")
-        else:
-            try:
-                names = mido.get_input_names()
-                self.head_tracker_devices = [name for name in names if "Head Tracker" in name]
-                if self.head_tracker_devices:
-                    self.rotation_note.set(
-                        "Hardware tracking available: " + ", ".join(self.head_tracker_devices)
-                    )
-                else:
-                    self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
-            except Exception as error:
-                self.midi_error = str(error)
-                self.rotation_note.set(f"Hardware tracking check failed: {self.midi_error}")
+        # if not self.head_tracker.is_available():
+        #     self.rotation_note.set("Hardware tracking unavailable: pyheadtracker is not installed.")
+        # elif mido is None:
+        #     self.rotation_note.set("Hardware tracking unavailable: mido is not installed.")
+        # else:
+        try:
+            names = mido.get_input_names()
+            self.head_tracker_devices = [name for name in names if "Head Tracker" in name]
+            if self.head_tracker_devices:
+                self.rotation_note.set(
+                    "Hardware tracking available: " + ", ".join(self.head_tracker_devices)
+                )
+            else:
+                self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
+        except Exception as error:
+            self.midi_error = str(error)
+            self.rotation_note.set(f"Hardware tracking check failed: {self.midi_error}")
 
         if hasattr(self, "tracking_mode_box"):
             modes = self.get_tracking_modes()
@@ -683,16 +679,16 @@ class AudioPlayerGUI:
             f"headphone {result['headphone']}"
         )
 
-    def update_rotation_backend_status(self):
-        if not self.has_loaded_player():
-            self.rotation_backend_text.set("Rotation backend: not loaded")
-            return
+    # def update_rotation_backend_status(self):
+    #     if not self.has_loaded_player():
+    #         self.rotation_backend_text.set("Rotation backend: not loaded")
+    #         return
 
-        if hasattr(self.player.sh, "get_rotation_backend_status"):
-            status = self.player.sh.get_rotation_backend_status()
-        else:
-            status = "unknown"
-        self.rotation_backend_text.set(f"Rotation backend: {status}")
+    #     if hasattr(self.player.sh, "get_rotation_backend_status"):
+    #         status = self.player.sh.get_rotation_backend_status()
+    #     else:
+    #         status = "unknown"
+    #     self.rotation_backend_text.set(f"Rotation backend: {status}")
 
     def _handle_error(self, title, error):
         message = str(error)
@@ -932,7 +928,7 @@ class AudioPlayerGUI:
                     self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
 
                     self.reset_progress_display()
-                    self.update_rotation_label()
+                    # self.update_rotation_label()
                     self.update_loaded_settings(result)
                     self.update_rotation_backend_status()
                     self.set_loading(False)
@@ -953,7 +949,7 @@ class AudioPlayerGUI:
                     self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
 
                     self.reset_progress_display()
-                    self.update_rotation_label()
+                    # self.update_rotation_label()
                     self.update_loaded_settings(result)
                     self.update_rotation_backend_status()
                     self.set_loading(False)
@@ -1272,7 +1268,7 @@ class AudioPlayerGUI:
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_text.get()}\n"
             f"{self.rotation_note.get()}\n"
-            f"{self.rotation_backend_text.get()}\n"
+            # f"{self.rotation_backend_text.get()}\n"
             f"Detected head trackers: {self.format_head_tracker_devices()}\n"
             f"{self.tracking_status.get()}\n"
             f"{self.tracking_angles.get()}\n"
