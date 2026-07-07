@@ -1,6 +1,7 @@
 import math
 import threading
 import time
+import mido
 import pyheadtracker as pht
 from dataclasses import dataclass
 from pythonosc.udp_client import SimpleUDPClient
@@ -112,8 +113,8 @@ class HeadTracker:
         if self._running:
             return
         self.ht = pht.supperware.HeadTracker1(
-            device_name="Head Tracker 1",
-            device_name_output="Head Tracker 2",
+            device_name=next(MIDIdevice for MIDIdevice in mido.get_input_names() if "Head Tracker" in MIDIdevice),
+            device_name_output=next(MIDIdevice for MIDIdevice in mido.get_output_names() if "Head Tracker" in MIDIdevice),
             refresh_rate=25,
             compass_on=True,
             orient_format="ypr",
