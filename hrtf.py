@@ -4,11 +4,7 @@ import numpy as np
 import pooch
 import spharpy
 import scipy.signal as sgn
-
-try:
-    import shroom.utils.math_utils as sh_util
-except ModuleNotFoundError:
-    sh_util = None
+import shroom.utils.math_utils as sh_util
 
 class HRTF:
     """
@@ -324,10 +320,6 @@ class Processing:
                 self.current_algorithm = algorithm
                 return self.__ls(hrirs, sh)
             case 'MagLS':
-                if not self._has_magls_backend():
-                    print("MagLS backend shroom.utils is not available. Falling back to LS preprocessing.")
-                    self.current_algorithm = 'LS'
-                    return self.__ls(hrirs, sh)
                 print("Using MagLS HRTF Preprocessing")
                 self.current_algorithm = algorithm
                 return self.__mag_ls(hrirs, sh)
@@ -341,9 +333,6 @@ class Processing:
                 print("Unknown preprocessing algorithm. Using LS preprocessing.")
                 self.current_algorithm = 'LS'
                 return self.__ls(hrirs, sh)
-
-    def _has_magls_backend(self):
-        return sh_util is not None and hasattr(sh_util, "magls")
 
     # solves the Least Squares Problem. This means just applying the spherical Harmonics to the HRTF
     def __ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics):
