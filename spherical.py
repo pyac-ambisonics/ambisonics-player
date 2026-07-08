@@ -231,7 +231,6 @@ class SphericalHarmonics:
         """
         try:
             self._rotation_queue.put_nowait((angles, convention))
-            print("Putting the newest Rotation in!")
         except queue.Full:
             try:
                 # drop the last cached block. queue should be empty now, since we only have size 1
@@ -241,7 +240,6 @@ class SphericalHarmonics:
                 pass
             # try putting a new block into the queue again after draining it
             self._rotation_queue.put_nowait((angles, convention))
-            print("Putting the newest Rotation in!")
 
         # finally, set the flag if we managed to successfully set a rotation
         self._rotation_update.set()

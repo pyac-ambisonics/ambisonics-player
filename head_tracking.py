@@ -109,6 +109,9 @@ class HeadTracker:
         self._thread = None
         self.ht = None
 
+    def is_available(self):
+        return pht is not None
+
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
     def start(self):
         if self._running:

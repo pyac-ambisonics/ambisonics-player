@@ -31,7 +31,7 @@ class RotationMatrix:
         # our resources folder
         p = Path(path)
         # filename
-        f = path / file
+        f = p / file
 
         # load the small d dictionary
         self.small_d = self._load_small_d(f)
@@ -141,21 +141,26 @@ class RotationMatrix:
         d : np.NDArray 
             The wigner small-d array approximately corresponding to the given beta value.
         """
+        # local copy of the small_d matrix corresponding to this order
+        sd = self.small_d[N]
+
+        # Extract the keys (shape (N,))
+        keys = sd[:, 0, 0]
         # Binary search for insertion point
-        pos = self.small_d.searchsorted(beta)
+        pos = keys.searchsorted(beta)
 
         # take care of the edge cases
-        n = len(self.small_d)
+        n = len(keys)
         if pos == 0:
-            return self.small_d[N][pos]
+            return sd[pos]
         if pos == n:
-            return self.small_d[N][n - 1]
+            return sd[n - 1]
 
         # Compare distances to left and right neighbours and return index of the closest
-        if beta - self.small_d[pos - 1] <= self.small_d[pos] - beta:
-            return self.small_d[N][pos - 1]
+        if beta - sd[pos - 1] <= sd[pos] - beta:
+            return sd[pos - 1]
         else:
-            return self.small_d[N][pos]
+            return sd[pos]
 
     @staticmethod
     def create_small_d_matrices_file(file: Path, step=0.5, sh_order=7):

@@ -930,7 +930,7 @@ class AudioPlayerGUI:
                     self.reset_progress_display()
                     # self.update_rotation_label()
                     self.update_loaded_settings(result)
-                    self.update_rotation_backend_status()
+                    # self.update_rotation_backend_status()
                     self.set_loading(False)
                     self.update_info()
 
@@ -951,7 +951,7 @@ class AudioPlayerGUI:
                     self.reset_progress_display()
                     # self.update_rotation_label()
                     self.update_loaded_settings(result)
-                    self.update_rotation_backend_status()
+                    # self.update_rotation_backend_status()
                     self.set_loading(False)
                     # make sure decoder settings are disabled if we only updated the decoder, because this only gets called on a play
                     self.set_decoder_settings_enabled(False)
@@ -1251,7 +1251,7 @@ class AudioPlayerGUI:
                 f"HRTF: {self.hrtf_path_value.get()}\n"
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_note.get()}\n"
-            f"{self.rotation_backend_text.get()}\n"
+            # f"{self.rotation_backend_text.get()}\n"
             f"Detected head trackers: {self.format_head_tracker_devices()}\n"
             f"{self.loaded_settings_text.get()}\n"
         )
