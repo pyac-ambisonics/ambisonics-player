@@ -2,13 +2,9 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+
 import pyheadtracker as pht
-from dataclasses import dataclass
-from pythonosc.udp_client import SimpleUDPClient
-from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import ThreadingOSCUDPServer
-from shroom.utils.rotation_utils import wigner_d_matrix
-from scipy.spatial.transform import Rotation
+
 
 @dataclass(frozen=True)
 class Orientation:
@@ -113,7 +109,24 @@ class HeadTracker:
         return pht is not None
 
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
-    def start(self):
+    def start(
+        self,
+        device_name="Head Tracker 1",
+        device_name_output="Head Tracker 2",
+        refresh_rate=25,
+    ):
+        """
+        Start hardware head tracking.
+
+        The device names can be passed in from the GUI instead of being hardcoded.
+        This makes the tracker more robust on machines with different MIDI device names.
+        """
+
+        if pht is None:
+            raise RuntimeError(
+                "pyheadtracker is not installed. Install requirements or use Demo tracking."
+            )
+
         if self._running:
             return
 
