@@ -106,7 +106,9 @@ class HeadTracker:
         self.ht = None
 
     def is_available(self):
-        return pht is not None
+        return (any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) 
+            and any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_output_names())
+        )
 
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
     def start(
@@ -131,15 +133,9 @@ class HeadTracker:
             return
 
         self.ht = pht.supperware.HeadTracker1(
-<<<<<<< HEAD
             device_name=next(MIDIdevice for MIDIdevice in mido.get_input_names() if "Head Tracker" in MIDIdevice),
             device_name_output=next(MIDIdevice for MIDIdevice in mido.get_output_names() if "Head Tracker" in MIDIdevice),
             refresh_rate=25,
-=======
-            device_name=device_name,
-            device_name_output=device_name_output,
-            refresh_rate=refresh_rate,
->>>>>>> main
             compass_on=True,
             orient_format="ypr",
             gestures_on="off",

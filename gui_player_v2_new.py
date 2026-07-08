@@ -8,8 +8,6 @@ from queue import Queue
 from tkinter import filedialog, messagebox
 from tkinter import ttk
 
-import mido
-
 from ambisonics_file_English import AmbisonicsFile
 from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
@@ -470,32 +468,18 @@ class AudioPlayerGUI:
 
     def get_tracking_modes(self):
         modes = ["Off"]
-        if self.head_tracker.is_available() and self.head_tracker_devices:
+        if self.head_tracker.is_available():
             modes.append("Hardware")
         modes.append("Demo")
         return modes
 
     def refresh_hardware_tracking_status(self, show_message=True):
-        self.head_tracker_devices = []
         self.midi_error = ""
 
-        if not self.head_tracker.is_available():
-            self.rotation_note.set("Hardware tracking unavailable: pyheadtracker is not installed.")
-        elif mido is None:
-            self.rotation_note.set("Hardware tracking unavailable: mido is not installed.")
+        if self.head_tracker.is_available():
+            self.rotation_note.set("Hardware tracking is available")
         else:
-            try:
-                names = mido.get_input_names()
-                self.head_tracker_devices = [name for name in names if "Head Tracker" in name]
-                if self.head_tracker_devices:
-                    self.rotation_note.set(
-                        "Hardware tracking available: " + ", ".join(self.head_tracker_devices)
-                    )
-                else:
-                    self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
-            except Exception as error:
-                self.midi_error = str(error)
-                self.rotation_note.set(f"Hardware tracking check failed: {self.midi_error}")
+            self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
 
         if hasattr(self, "tracking_mode_box"):
             modes = self.get_tracking_modes()
