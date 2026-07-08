@@ -1024,7 +1024,7 @@ class AudioPlayerGUI:
             return
 
         try:
-            self.player.set_volume(volume**(1.5 + 1.5 * volume))
+            self.player.set_volume(volume**(1 + 3 * volume))
             self.update_info()
         except Exception as error:
             self._handle_error("Error", error)
