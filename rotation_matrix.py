@@ -249,7 +249,7 @@ class RotationMatrix:
             return sd[n - 1]
 
         # Compare distances to left and right neighbours and return index of the closest
-        if beta - sd[pos - 1] <= sd[pos] - beta:
+        if beta - keys[pos - 1] <= keys[pos] - beta:
             return sd[pos - 1]
         else:
             return sd[pos]

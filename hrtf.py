@@ -223,7 +223,6 @@ class HRTF:
             
         # apply headphone filter to hrirs
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
-        print(f"Samplelength of HRIR: {self.get_IR_length()}")
         self.current_filter = name
         return hp_filter
     
@@ -248,7 +247,6 @@ class HRTF:
         # convolve hrirs with the dfe filter
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, min_phase_dfe, mode='full')
 
-        print(f"Samplelength of HRIR: {self.get_IR_length()}")
         return min_phase_dfe
 
     

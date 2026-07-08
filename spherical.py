@@ -57,6 +57,8 @@ class SphericalHarmonics:
         ambi_order : int, optional
             Ambisonic order used for the spherical-harmonic decomposition.
         """
+        start = time.time()
+        
         # # set the hrtf. this should be a pyfar signal!
         # self.hrtf = hrtf
 
@@ -92,19 +94,16 @@ class SphericalHarmonics:
                                                                          self.sources, 
                                                                         #  inverse_method="pseudo_inverse"
                                                                          )
-        print(f"{self.spherical_harmonics.basis_type=}")
 
         # create hrtf processing unit
         self.process = Processing()
 
-        start = time.time()
         # create h_nm matrix 
         hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
                                                algorithm='MagLS'
                                                )
         
-        print(f"Doing HRTF preprocessing took {time.time() - start:.2f}s")
         print("Convert to Spherical Harmonic Signal")
         self.hrir_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
                                                                    hrirs_nm.time, 
@@ -141,6 +140,7 @@ class SphericalHarmonics:
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self._find_gain()
+        print(f"Setting up Spherical Harmonics took {time.time() - start:.2f}s")
 
     def update_order(self, order: int, block_size=None):
         # create a spherical harmonics definition, corresponding to the AmbiX convention
