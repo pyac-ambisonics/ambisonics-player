@@ -3,17 +3,14 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-from hrtf import HRTF, Processing
-from scipy.spatial.transform import Rotation
 import utils
 import time
 import threading
 import queue
-
-try:
-    from shroom.utils.rotation_utils import wigner_d_matrix
-except ModuleNotFoundError:
-    wigner_d_matrix = None
+from shroom.utils.rotation_utils import wigner_d_matrix
+from hrtf import HRTF, Processing
+from rotation_matrix import RotationMatrix
+from scipy.spatial.transform import Rotation
 
 class SphericalHarmonics:
     """
@@ -118,11 +115,11 @@ class SphericalHarmonics:
         # update this later by calling update_hrirs_fft() once we know the desired fft length
         self.hrir_nm_fft = np.fft.fft(self.hrir_nm, utils.next_power_of_two(pad_to_length), axis=-1)
 
+        # create SH rotation unit
+        self.rotation = RotationMatrix()
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self._D = None
-        self.rotation_backend_available = wigner_d_matrix is not None
-        self._warned_rotation_fallback = False
         self._last_rotation = Rotation.from_euler('xyz', (0, 0, 0))
         self.atol = np.deg2rad(2)
 
@@ -204,7 +201,9 @@ class SphericalHarmonics:
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
-        new_D = self._build_rotation_matrix(angles, convention)
+        rotation = Rotation.from_euler(convention, angles, degrees=True)
+        alpha, beta, gamma = rotation.as_euler("zyz")
+        new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
          # using the fft, since we expect this to be faster than time domain
         # 3. Apply rotation
@@ -217,26 +216,6 @@ class SphericalHarmonics:
         with self._rotation_lock:
             self._D = new_D
             self.hrir_nm_rot = new_rot
-
-    def _build_rotation_matrix(self, angles, convention='zyx'):
-        channels = utils.order_to_channel_n(self.ambi_order)
-        if wigner_d_matrix is None:
-            if not self._warned_rotation_fallback:
-                print("shroom.utils.rotation_utils is not available. Rotation uses identity fallback.")
-                self._warned_rotation_fallback = True
-            return np.eye(channels)
-
-        rotation = Rotation.from_euler(convention, angles, degrees=True)
-        alpha, beta, gamma = rotation.as_euler("zyz")
-        return wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
-
-    def has_rotation_backend(self):
-        return self.rotation_backend_available
-
-    def get_rotation_backend_status(self):
-        if self.rotation_backend_available:
-            return "available"
-        return "fallback identity (audio rotation disabled)"
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -252,7 +231,6 @@ class SphericalHarmonics:
         """
         try:
             self._rotation_queue.put_nowait((angles, convention))
-            print("Putting the newest Rotation in!")
         except queue.Full:
             try:
                 # drop the last cached block. queue should be empty now, since we only have size 1
@@ -262,7 +240,6 @@ class SphericalHarmonics:
                 pass
             # try putting a new block into the queue again after draining it
             self._rotation_queue.put_nowait((angles, convention))
-            print("Putting the newest Rotation in!")
 
         # finally, set the flag if we managed to successfully set a rotation
         self._rotation_update.set()
@@ -283,20 +260,19 @@ class SphericalHarmonics:
             # get pending angles and rotation
             try:
                 angles, convention = self._rotation_queue.get_nowait()
-                print("Consuming the newest Rotation!")
             except queue.Empty:
                 continue
 
             rotation = Rotation.from_euler(convention, angles, degrees=True)
             # skip this calculation if no meaningful rotation has happened
             if rotation.approx_equal(self._last_rotation, atol=self.atol):
-                print("Dropping this rotation, too close to last one!")
                 continue
 
             # update the last rotation
             self._last_rotation = rotation
             # compute wigner D matrix
-            new_D = self._build_rotation_matrix(angles, convention)
+            alpha, beta, gamma = rotation.as_euler("zyz")
+            new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
     
             # using the fft, since we expect this to be faster than time domain
             # 3. Apply rotation
@@ -337,6 +313,7 @@ class SphericalHarmonics:
         # einsum: ij, cjk -> cik
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
         D = self.get_rotation_matrix()
+        # if D is None, do nothing and keep our latest rotated hrir_nm
         if D is not None:
             # using the fft, since we expect this to be faster than time domain
             self.hrir_nm_rot = D @ self.hrir_nm_fft
