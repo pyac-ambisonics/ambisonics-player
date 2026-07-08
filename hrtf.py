@@ -417,7 +417,6 @@ class Processing:
                 # above cutoff: do least squares, magnitude from original, phase from min-phase
                 nm_magls[ear, :, f] = (
                     # use shroom library for speed
-                    # only returns real numbers????
                     alpha[f] * sh_util.magls(A=sh_basis, 
                                              b=hrirs_freq[:, ear, f], 
                                              x_prev=nm_magls[ear, :, f-1]
