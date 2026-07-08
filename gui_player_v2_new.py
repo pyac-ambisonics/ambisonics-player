@@ -8,16 +8,13 @@ from queue import Queue
 from tkinter import filedialog, messagebox
 from tkinter import ttk
 
+import mido
+
 from ambisonics_file_English import AmbisonicsFile
 from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
-
-try:
-    import mido
-except ModuleNotFoundError:
-    mido = None
 
 
 class AudioPlayerGUI:
@@ -977,21 +974,27 @@ class AudioPlayerGUI:
     # ==============================================================
 
     def play(self):
+        """
+        Start or resume playback.
+
+        Decoder settings are applied when loading an AmbiX file.
+        The Play button should not rebuild the decoder, because this can block
+        the Tkinter GUI thread and make the interface feel frozen.
+        """
+
         if not self.has_loaded_player():
             return
+
+        if self.is_loading:
+            return
+
         try:
-            self.update_decoder_settings()
-            # wait until any updates are done
-            self.update_event.wait()
-
-            # for safety
-            if not self.has_loaded_player():
-                return
-
             self.player.play()
             self.set_decoder_settings_enabled(False)
             self.playback_status.set("Status: Playing")
+            self.playback_status_label.configure(foreground="black")
             self.update_info()
+
         except Exception as error:
             self._handle_error("Error", error)
 

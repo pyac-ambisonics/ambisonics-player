@@ -3,10 +3,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-try:
-    import pyheadtracker as pht
-except ModuleNotFoundError:
-    pht = None
+import pyheadtracker as pht
 
 
 @dataclass(frozen=True)
@@ -112,7 +109,19 @@ class HeadTracker:
         return pht is not None
 
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
-    def start(self):
+    def start(
+        self,
+        device_name="Head Tracker 1",
+        device_name_output="Head Tracker 2",
+        refresh_rate=25,
+    ):
+        """
+        Start hardware head tracking.
+
+        The device names can be passed in from the GUI instead of being hardcoded.
+        This makes the tracker more robust on machines with different MIDI device names.
+        """
+
         if pht is None:
             raise RuntimeError(
                 "pyheadtracker is not installed. Install requirements or use Demo tracking."
@@ -120,21 +129,24 @@ class HeadTracker:
 
         if self._running:
             return
+
         self.ht = pht.supperware.HeadTracker1(
-            device_name="Head Tracker 1",
-            device_name_output="Head Tracker 2",
-            refresh_rate=25,
+            device_name=device_name,
+            device_name_output=device_name_output,
+            refresh_rate=refresh_rate,
             compass_on=True,
             orient_format="ypr",
             gestures_on="off",
-            chirality="preserve" # Change this later with UI switch!
+            chirality="preserve",
         )
+
         self.ht.open()
         self.ht.zero()
+
         self._running = True
         self._thread = threading.Thread(
             target=self._tracking_loop,
-            daemon=True
+            daemon=True,
         )
         self._thread.start()
 
