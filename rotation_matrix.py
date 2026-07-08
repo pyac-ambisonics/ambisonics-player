@@ -31,7 +31,7 @@ class RotationMatrix:
         # our resources folder
         p = Path(path)
         # filename
-        ff = path / file
+        f = path / file
 
         # load the small d dictionary
         self.small_d = self._load_small_d(f)
