@@ -424,11 +424,6 @@ class Processing:
                                              b=hrirs_freq[:, ear, f], 
                                              x_prev=nm_magls[ear, :, f-1]
                                              )
-                    # our own solution
-                    # alpha[f] * self.__mag_ls_solver(Y=sh_basis, 
-                    #                                 target=hrirs_freq[:, ear, f], 
-                    #                                 x_prev=nm_magls[ear, :, f-1]
-                    #                                 )
                     + (1 - alpha[f]) * hrirs_sh[ear, :, f]
                 )
         
