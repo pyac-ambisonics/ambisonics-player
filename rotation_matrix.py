@@ -9,7 +9,8 @@ from pathlib import Path
 
 class RotationMatrix:
     """
-    A class prividing functionality to calculate Wigner-D rotation matrices. 
+    A class prividing functionality to calculate Wigner-D rotation matrices. The class gives functionality to precalculate a set of
+    Wigner small-d matrices, save them to a file, load that file and calculate Wigner-D matrices based on the rpecalculated small-d matrices.
     
     Copyright (c) 2026 Kylan Klein Lenderink
 
@@ -36,6 +37,21 @@ class RotationMatrix:
         self.small_d = self._load_small_d(f)
     
     def _load_small_d(self, file: Path):
+        """
+        Load a .npz file containing precalculated wigner small-d matrices.
+
+        Parameters
+        ----------
+        file : Path
+            The Path to the file to be loaded.
+
+        Returns
+        ----------
+        d : dict
+            A dictionary containing all preloaded small-d matrices.
+            Key (int) corresponds to SH order.
+            Value is the small-d Matrix.
+        """
         # load file
         loaded = np.load(file=file)
 
@@ -141,28 +157,42 @@ class RotationMatrix:
         else:
             return self.small_d[N][pos]
 
-def create_small_d_matrices_file(file: Path, step=0.5, sh_order=7) -> None:
-    # create angles with specific step size
-    # step can never be smaller than 1 degree
-    if step < 0.1:
-        step = 0.1
-    angles = np.arange(0, 360.1, step)
-    angles_rad = np.deg2rad(angles)
-    length = len(angles)
+    @staticmethod
+    def create_small_d_matrices_file(file: Path, step=0.5, sh_order=7):
+        """
+        This function creates a set of Wigner small-d matrices for all possible beta values (0-360°) per order up to 
+        the given order sh_order (7 is default). The stepsize of the betavalue can be changed. A valid filepath must be given.
 
-    # dictionary that stores key-value pair (order-small_d)
-    results = {}
+        Parameters
+        ----------
+        file : Path
+            Path to the file to write the small-d amtrices to
+        step : float, optional
+            Stepsize in degrees of the betavalues. Default is 0.5
+        sh_order : int, optional
+            The maximum SH/Ambisonics order to calculate small-d matrices for. Default is 7.
+        """
+        # create angles with specific step size
+        # step can never be smaller than 1 degree
+        if step < 0.1:
+            step = 0.1
+        angles = np.arange(0, 360.1, step)
+        angles_rad = np.deg2rad(angles)
+        length = len(angles)
 
-    for order in range(sh_order+1):
-        # size of small D matrix
-        dim = 2 * order + 1
-        # prepare empty array with shape (order, len(beta), dim, dim). small d is real valued!
-        d = np.empty((length, dim, dim), dtype=np.float64)
+        # dictionary that stores key-value pair (order-small_d)
+        results = {}
 
-        for i, beta in enumerate(angles_rad):
-            d[i] = rot_utils._wigner_small_d(order, beta)
+        for order in range(sh_order+1):
+            # size of small D matrix
+            dim = 2 * order + 1
+            # prepare empty array with shape (order, len(beta), dim, dim). small d is real valued!
+            d = np.empty((length, dim, dim), dtype=np.float64)
 
-        results[str(order)] = d
+            for i, beta in enumerate(angles_rad):
+                d[i] = rot_utils._wigner_small_d(order, beta)
 
-    # save the file
-    np.savez_compressed(file, allow_pickle=False, **results)
+            results[str(order)] = d
+
+        # save the file
+        np.savez_compressed(file, allow_pickle=False, **results)
