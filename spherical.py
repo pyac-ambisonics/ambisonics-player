@@ -90,8 +90,9 @@ class SphericalHarmonics:
         # create the spherical harmonics object from definition and sampling sphere
         self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
                                                                          self.sources, 
-                                                                         inverse_method="pseudo_inverse"
+                                                                        #  inverse_method="pseudo_inverse"
                                                                          )
+        print(f"{self.spherical_harmonics.basis_type=}")
 
         # create hrtf processing unit
         self.process = Processing()
@@ -272,7 +273,7 @@ class SphericalHarmonics:
             self._last_rotation = rotation
             # compute wigner D matrix
             alpha, beta, gamma = rotation.as_euler("zyz")
-            new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+            new_D = self.rotation.real_wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
     
             # using the fft, since we expect this to be faster than time domain
             # 3. Apply rotation
