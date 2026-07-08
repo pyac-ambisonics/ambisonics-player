@@ -5,93 +5,164 @@ and hardswapped to make the rotation faster and make realtime computation achiev
 
 import numpy as np
 import shroom.utils.rotation_utils as rot_utils
-from scipy.spatial.transform import Rotation
 from pathlib import Path
 
 class RotationMatrix:
-
-    def __init__(self, D):
-        self.D = D
-
-    def from_angles(self, angles, order, convention='zyx'):
-        return RotationMatrix(compute_wigner_D(angles, order, convention))
-
-def compute_wigner_D(angles, order, convention='zyx'):
     """
-    Directly Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx). This will block the thread!
-    The updating is done in a thread-safe manner.
+    A class prividing functionality to calculate Wigner-D rotation matrices. 
+    
+    Copyright (c) 2026 Kylan Klein Lenderink
 
-    Parameters
-    ----------
-    angles : sequence of float
-        Euler angles in degrees as (z, y, x).
-    convention : str
-        A string identifying the used convention/order of the angles. 'zyx' is default.
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files 
+    (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, 
+    publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do 
+    so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+    OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE 
+    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
+    IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     """
 
-    rotation = Rotation.from_euler(convention, angles, degrees=True)
-    alpha, beta, gamma = rotation.as_euler("zyz")
-    return rot_utils.wigner_d_matrix(order, alpha, beta, gamma)
+    def __init__(self, path='resources/rotation_matrices/', file='small_d_matrices_0.5deg.npz'):
+        # our resources folder
+        p = Path(path)
+        # filename
+        ff = path / file
 
-# def create_matrices(step=2):
-#     # create angles with specific step size
-#     # step can never be smaller than 1 degree
-#     if step < 1:
-#         step = 1
-#     angles = np.arange(0, 361, step)
-#     length = len(angles)
-#     # dimension of the wigner D matrix is 64 for 7th order ((7+1)**2)
-#     dim = 64
-#     # prepare empty array with shape (z, y, x, dim, dim)
-#     D = np.empty((length, length, length, dim, dim), dtype=np.complex128)
+        # load the small d dictionary
+        self.small_d = self._load_small_d(f)
+    
+    def _load_small_d(self, file: Path):
+        # load file
+        loaded = np.load(file=file)
 
-#     # nested loop for building all matrices
-#     for i, z in enumerate(angles):
-#         for j, y in enumerate(angles):
-#             for k, x in enumerate(angles):
-#                 D[i, j, k] = compute_wigner_D((z, y, x), 7)
+        # convert NpzFile to Dictionary
+        d = {}
+        for order in loaded.keys():
+            d[int(order)] = loaded[order]
 
-#     return D
+        # close file
+        loaded.close()
 
-def create_small_d_matrices(step=1):
+        return d
+
+    def wigner_d_matrix(self, N: int, alpha: float, beta: float, gamma: float):
+        """
+        Compute the Wigner-D matrix for Spherical Harmonics rotation.
+        This implementation is taken from @Yhonatangayers implementation
+        in the pyshroom package. It has been adapted for use with precalculated
+        small_d matrices as per the terms of the MIT Licence, which the pyshroom
+        package is licensed udner.
+
+
+        The matrix D rotates SH coefficients such that:
+        f_rot(omega) = f(R^-1 omega)
+        c_rot = D(R) @ c
+
+        Parameters
+        ----------
+        N : int
+            Maximum SH order.
+        alpha, beta, gamma : float
+            Euler angles in radians (Z-Y-Z convention).
+            Rotation R = Rz(alpha) * Ry(beta) * Rz(gamma).
+
+        Returns
+        -------
+        D : np.ndarray
+            Wigner-D matrix of shape ((N+1)^2, (N+1)^2).
+            Block diagonal structure with blocks of size (2n+1)x(2n+1).
+        """
+        # Total number of coefficients
+        L = (N + 1) ** 2
+        D = np.zeros((L, L), dtype=np.complex128)
+
+        # Compute for each order n
+        for n in range(N + 1):
+            # Get the small-d matrix for this order
+            d_n = self._query_small_d(n, beta)
+
+            # Construct the full D matrix for this order
+            # D^n_{m',m} = e^{-i m' alpha} * d^n_{m',m}(beta) * e^{-i m gamma}
+
+            m_range = np.arange(-n, n + 1)
+
+            # Phase terms
+            # exp(-i * m' * alpha)  [rows]
+            phase_left = np.exp(-1j * m_range * alpha)
+
+            # exp(-i * m * gamma)   [cols]
+            phase_right = np.exp(-1j * m_range * gamma)
+
+            # Combine: D = diag(phase_left) @ d @ diag(phase_right)
+            # Broadcasting: (2n+1, 1) * (2n+1, 2n+1) * (1, 2n+1)
+            D_n = phase_left[:, np.newaxis] * d_n * phase_right[np.newaxis, :]
+
+            # Place in the big matrix
+            start_idx = n**2
+            end_idx = (n + 1) ** 2
+            D[start_idx:end_idx, start_idx:end_idx] = D_n
+
+        return D
+
+    def _query_small_d(self, N: int, beta: float) -> np.ndarray:
+        """
+        Gets the small_d value from the precalculated and loaded file. The beta value closest to the 
+        next available precalculated beta is used.
+
+        Parameters
+        ----------
+        N : int
+            The ambisonics/SH order for the queried wigner small-d matrix.
+        beta : float
+            The Euler beta angle in radians.
+
+        Returns
+        ---------
+        d : np.NDArray 
+            The wigner small-d array approximately corresponding to the given beta value.
+        """
+        # Binary search for insertion point
+        pos = self.small_d.searchsorted(beta)
+
+        # take care of the edge cases
+        n = len(self.small_d)
+        if pos == 0:
+            return self.small_d[N][pos]
+        if pos == n:
+            return self.small_d[N][n - 1]
+
+        # Compare distances to left and right neighbours and return index of the closest
+        if beta - self.small_d[pos - 1] <= self.small_d[pos] - beta:
+            return self.small_d[N][pos - 1]
+        else:
+            return self.small_d[N][pos]
+
+def create_small_d_matrices_file(file: Path, step=0.5, sh_order=7) -> None:
     # create angles with specific step size
     # step can never be smaller than 1 degree
     if step < 0.1:
         step = 0.1
     angles = np.arange(0, 360.1, step)
+    angles_rad = np.deg2rad(angles)
     length = len(angles)
-    
-    d = np.empty((8, length, dim, dim), dtype=np.float64)
 
     # dictionary that stores key-value pair (order-small_d)
     results = {}
 
-    for order in range(8):
+    for order in range(sh_order+1):
         # size of small D matrix
         dim = 2 * order + 1
         # prepare empty array with shape (order, len(beta), dim, dim). small d is real valued!
         d = np.empty((length, dim, dim), dtype=np.float64)
 
-        for i, beta in enumerate(angles):
-            d[order, i] = rot_utils._wigner_small_d(order, beta)
+        for i, beta in enumerate(angles_rad):
+            d[i] = rot_utils._wigner_small_d(order, beta)
 
-        results[order] = d
+        results[str(order)] = d
 
-    return results
-
-
-def main():
-    # create matrices
-    matrices = create_matrices()
-    
-    # save to resources folder
-    path = Path('/resources/rotation_matrices/')
-    file = path / 'matrices_7th_order_2deg.npz'
-
-    # save that shit
-    np.savez_compressed(file, **matrices)
-
-
-
-if __name__ == "__main__":
-    main()
+    # save the file
+    np.savez_compressed(file, allow_pickle=False, **results)
