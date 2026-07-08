@@ -62,7 +62,7 @@ class AudioPlayer:
         self.overlap_buffer = None 
         # overlap add L
         self.sh_length = None
-        # overlap add M
+        # overlap add M. needs to be updated if chunk_size gets updated
         self.block_size = ambi_file.get_chunk_size()
         # overlap add N
         self.N = None
@@ -157,7 +157,8 @@ class AudioPlayer:
                 else:
                     # queue None-item as flag that playback has ended
                     self.audio_queue.put(None)
-                    break
+                    # clear the play event
+                    self.play_event.clear()
 
     # process a single chunk of data, performing an overlap-add algorithm
     def _process_chunk(self, chunk):
@@ -179,7 +180,6 @@ class AudioPlayer:
         stereo[:self.sh_length-1] += self.overlap_buffer
         # save new overlap buffer
         self.overlap_buffer[:] = stereo[block_size:block_size + self.sh_length - 1]
-
     
         return stereo[:block_size]
 
@@ -322,7 +322,7 @@ class AudioPlayer:
 
         # If stream exists but is not playing, close it first
         if self.stream is not None:
-            self.stop(reset_position=False)
+            self.stop()
 
         # reset stop and pause flags
         self.stop_event.clear()
@@ -430,6 +430,13 @@ class AudioPlayer:
         # clear the play event at the end
         self.play_event.clear()
         print("Playback stopped.")
+
+    def close(self):
+        """
+        Closes the player completely, preparing it for termination. The player cannot be used after calling this.
+        """
+        self.stop()
+        self.sh.close()
 
     def set_volume(self, volume: float):
         """

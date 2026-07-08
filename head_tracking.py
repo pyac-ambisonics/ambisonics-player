@@ -4,9 +4,6 @@ import time
 import mido
 import pyheadtracker as pht
 from dataclasses import dataclass
-from pythonosc.udp_client import SimpleUDPClient
-from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import ThreadingOSCUDPServer
 
 
 @dataclass(frozen=True)
@@ -75,7 +72,7 @@ class DemoHeadTracker:
     def _tracking_loop(self):
         while self._running:
             elapsed = time.perf_counter() - self._start_time
-            phase = 2 * math.pi * elapsed / self.period
+            phase = (2 * math.pi * elapsed / self.period) * 0.3
             yaw = self.yaw_amplitude * math.sin(phase)
             pitch = self.pitch_amplitude * math.sin(phase * 0.5)
             self.orientation_state.set(
@@ -91,7 +88,7 @@ class DemoHeadTracker:
             return self.orientation_state.get()
 
         elapsed = time.perf_counter() - self._start_time
-        phase = 2.0 * math.pi * elapsed / self.period
+        phase = (2.0 * math.pi * elapsed / self.period) * 0.3
         yaw = self.yaw_amplitude * math.sin(phase)
         pitch = self.pitch_amplitude * math.sin(phase * 0.5)
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
@@ -108,25 +105,54 @@ class HeadTracker:
         self._thread = None
         self.ht = None
 
+    def is_available(self):
+        return pht is not None
+
     # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
-    def start(self):
+    def start(
+        self,
+        device_name="Head Tracker 1",
+        device_name_output="Head Tracker 2",
+        refresh_rate=25,
+    ):
+        """
+        Start hardware head tracking.
+
+        The device names can be passed in from the GUI instead of being hardcoded.
+        This makes the tracker more robust on machines with different MIDI device names.
+        """
+
+        if pht is None:
+            raise RuntimeError(
+                "pyheadtracker is not installed. Install requirements or use Demo tracking."
+            )
+
         if self._running:
             return
+
         self.ht = pht.supperware.HeadTracker1(
+<<<<<<< HEAD
             device_name=next(MIDIdevice for MIDIdevice in mido.get_input_names() if "Head Tracker" in MIDIdevice),
             device_name_output=next(MIDIdevice for MIDIdevice in mido.get_output_names() if "Head Tracker" in MIDIdevice),
             refresh_rate=25,
+=======
+            device_name=device_name,
+            device_name_output=device_name_output,
+            refresh_rate=refresh_rate,
+>>>>>>> main
             compass_on=True,
             orient_format="ypr",
             gestures_on="off",
-            chirality="preserve" # Change this later with UI switch!
+            chirality="preserve",
         )
+
         self.ht.open()
         self.ht.zero()
+
         self._running = True
         self._thread = threading.Thread(
             target=self._tracking_loop,
-            daemon=True
+            daemon=True,
         )
         self._thread.start()
 
@@ -148,12 +174,19 @@ class HeadTracker:
                 source="hardware"
             )
 
+        self._running = False
+
     def stop(self):
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1)
         if self.ht is not None:
-            self.ht.close()
+            try:
+                self.ht.close()
+            except Exception as error:
+                print(error)
+            finally:
+                self.ht = None
 
     def zero(self):
         if self.ht is not None:

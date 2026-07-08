@@ -37,6 +37,7 @@ ambisonics-player/
   requirements.txt             Python dependencies
   spherical.py                 spherical-harmonic HRTF decoding and rotation hook
   utils.py                     channel/order and FFT helper functions
+  mido
 ```
 
 ## Setup
