@@ -9,6 +9,7 @@ import threading
 import queue
 from shroom.utils.rotation_utils import wigner_d_matrix
 from hrtf import HRTF, Processing
+from rotation_matrix import RotationMatrix
 from scipy.spatial.transform import Rotation
 
 class SphericalHarmonics:
@@ -114,6 +115,8 @@ class SphericalHarmonics:
         # update this later by calling update_hrirs_fft() once we know the desired fft length
         self.hrir_nm_fft = np.fft.fft(self.hrir_nm, utils.next_power_of_two(pad_to_length), axis=-1)
 
+        # create SH rotation unit
+        self.rotation = RotationMatrix()
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self._D = None
@@ -200,7 +203,7 @@ class SphericalHarmonics:
         """
         rotation = Rotation.from_euler(convention, angles, degrees=True)
         alpha, beta, gamma = rotation.as_euler("zyz")
-        new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+        new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
 
          # using the fft, since we expect this to be faster than time domain
         # 3. Apply rotation
@@ -259,21 +262,19 @@ class SphericalHarmonics:
             # get pending angles and rotation
             try:
                 angles, convention = self._rotation_queue.get_nowait()
-                print("Consuming the newest Rotation!")
             except queue.Empty:
                 continue
 
             rotation = Rotation.from_euler(convention, angles, degrees=True)
             # skip this calculation if no meaningful rotation has happened
             if rotation.approx_equal(self._last_rotation, atol=self.atol):
-                print("Dropping this rotation, too close to last one!")
                 continue
 
             # update the last rotation
             self._last_rotation = rotation
             # compute wigner D matrix
             alpha, beta, gamma = rotation.as_euler("zyz")
-            new_D = wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+            new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
     
             # using the fft, since we expect this to be faster than time domain
             # 3. Apply rotation
@@ -314,6 +315,7 @@ class SphericalHarmonics:
         # einsum: ij, cjk -> cik
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
         D = self.get_rotation_matrix()
+        # if D is None, do nothing and keep our latest rotated hrir_nm
         if D is not None:
             # using the fft, since we expect this to be faster than time domain
             self.hrir_nm_rot = D @ self.hrir_nm_fft
