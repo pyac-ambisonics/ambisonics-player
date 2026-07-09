@@ -45,7 +45,7 @@ class SphericalHarmonics:
     """
 
     # Constructor
-    def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1):
+    def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1, preprocess='MagLS'):
         """Initialize spherical-harmonic HRTF processing.
 
         Parameters
@@ -56,6 +56,8 @@ class SphericalHarmonics:
             Target sampling rate in Hz for HRIR resampling. Default is 48000.
         ambi_order : int, optional
             Ambisonic order used for the spherical-harmonic decomposition.
+        prepocess : str, optional
+            Preprocessing algorithm to use on HRTF. Currently LS and MagLS are implemented. MagLS is default
         """
         start = time.time()
         
@@ -101,7 +103,7 @@ class SphericalHarmonics:
         # create h_nm matrix 
         hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
-                                               algorithm='MagLS'
+                                               algorithm=preprocess
                                                )
         
         print("Convert to Spherical Harmonic Signal")
