@@ -44,6 +44,8 @@ class HRTF:
         internet using `load_hrtf_from_web()`.
         """
         self.app_dir = Path(__file__).resolve().parent
+        if path is None:    
+            path = self.DEFAULT_HRTF_FILE
         self.path = resolve_path(path)
 
         # load HRTF from files

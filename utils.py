@@ -5,9 +5,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-def resolve_path(self, path):
+def resolve_path(path):
         if path is None:
-            path = self.DEFAULT_HRTF_FILE
+            return None
 
         try:
             candidate = Path(path)
@@ -18,7 +18,7 @@ def resolve_path(self, path):
         if candidate.is_absolute():
             return candidate
 
-        local_candidate = self.app_dir / candidate
+        local_candidate = Path(__file__).resolve().parent / candidate
         if local_candidate.exists():
             return local_candidate
 
