@@ -66,7 +66,7 @@ class HRTF:
 
     def resolve_path(self, path):
         if path is None:
-            return None
+            path = self.DEFAULT_HRTF_FILE
 
         try:
             candidate = Path(path)
