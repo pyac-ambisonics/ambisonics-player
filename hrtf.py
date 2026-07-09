@@ -25,6 +25,8 @@ class HRTF:
         Source coordinate array associated with `hrirs`.
     """
 
+    DEFAULT_HRTF_FILE = "FABIAN_HRIR_measured_HATO_0.sofa"
+
     def __init__(self, path=None):
         """
         Initialize an `HRTF` instance and load HRTF data. Initialize a list of available headphone
@@ -52,7 +54,11 @@ class HRTF:
         self.resources = self.app_dir / "resources"
         self.hp_dir = self.resources / "Headphones"
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
-        self.hp_list = [x.name for x in hp_subdir]
+        # check if this is the FABIAN HRTF Dataset. in that case we have headphone filters for it
+        if self.path.name == self.DEFAULT_HRTF_FILE:
+            self.hp_list = [x.name for x in hp_subdir]
+        else:
+            self.hp_list = []
         self.hp_list.append("Diffuse Field Equalization")
 
         # store the current HP filter name
