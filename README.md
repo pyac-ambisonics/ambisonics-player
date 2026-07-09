@@ -74,6 +74,12 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+Install pyheadtracker separately without it's dependencies. This is important because it will avoid an error produced by one unnecessary dependency:
+
+```powershell
+python -m pip install pyheadtracker --no-deps
+```
+
 ## Run
 
 ```powershell
