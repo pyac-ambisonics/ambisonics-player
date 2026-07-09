@@ -401,8 +401,9 @@ class AudioPlayerGUI:
         self.hrtf_button = ttk.Button(card, text="Browse", command=self.select_hrtf_file)
         self.hrtf_button.grid(row=5, column=4, sticky="w", pady=(16, 0))
 
-        self.edit_settings_button = ttk.Button(card, text="Edit Settings", command=self.unlock_decoder_settings)
-        self.edit_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button = ttk.Button(card, text="Apply Settings", command=self.apply_decoder_settings)
+        self.apply_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button.configure(state=tk.DISABLED)
 
         ttk.Label(card, textvariable=self.loaded_settings_text, style="SmallInfo.TLabel").grid(
             row=6, column=0, columnspan=6, sticky="w", pady=(12, 0)
@@ -605,8 +606,6 @@ class AudioPlayerGUI:
         ]:
             widget.configure(state=state)
 
-        self.edit_settings_button.configure(state=tk.NORMAL if self.has_loaded_player() else tk.DISABLED)
-
     def set_decoder_settings_enabled(self, enabled: bool):
         self.order_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.block_size_box.configure(state="readonly" if enabled else tk.DISABLED)
@@ -623,29 +622,25 @@ class AudioPlayerGUI:
 
         return str(candidate.resolve())
 
-    def _reset_edit_button(self):
-        """Reset the settings button to its default 'Edit Settings' state."""
-        self.edit_settings_button.configure(
-            text="Edit Settings",
-            command=self.unlock_decoder_settings,
+    def _update_apply_button(self):
+        """Enable Apply Settings only when playback is fully stopped."""
+        if not self.has_loaded_player() or self.is_loading:
+            self.apply_settings_button.configure(state=tk.DISABLED)
+            return
+        player = self.player
+        is_stopped = (
+            not player.play_event.is_set()
+            and not player.pause_event.is_set()
+        )
+        self.apply_settings_button.configure(
+            state=tk.NORMAL if is_stopped else tk.DISABLED
         )
 
-    def unlock_decoder_settings(self):
-        """Unlock decoder controls for editing, toggle button to Apply mode."""
-        self.set_decoder_settings_enabled(True)
-        self.decoder_note.set("Settings unlocked. Edit parameters, then click 'Apply Settings'.")
-        self.edit_settings_button.configure(
-            text="Apply Settings",
-            command=self.apply_decoder_settings,
-    )
-
     def apply_decoder_settings(self):
-        """Apply current decoder settings and re-lock controls."""
+        """Apply current decoder settings."""
         if not self.has_loaded_player():
             return
-        self.set_decoder_settings_enabled(False)
         self.decoder_note.set("Applying decoder settings...")
-        self._reset_edit_button()
         self.update_decoder_settings()
 
     def set_loading(self, loading: bool, message=""):
@@ -658,13 +653,14 @@ class AudioPlayerGUI:
             self.pipeline_status.set(f"Pipeline: {message or 'loading'}")
             self.ambix_button.configure(state=tk.DISABLED)
             self.set_decoder_settings_enabled(False)
-            self.edit_settings_button.configure(state=tk.DISABLED)
+            self.apply_settings_button.configure(state=tk.DISABLED)
             self.set_controls_enabled(False)
         else:
             self.loading_text.set("")
             self.ambix_button.configure(state=tk.NORMAL)
             self.set_decoder_settings_enabled(self.has_loaded_player())
             self.set_controls_enabled(self.has_loaded_player())
+            self._update_apply_button()
 
         self.root.update_idletasks()
 
@@ -1011,8 +1007,7 @@ class AudioPlayerGUI:
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
                     self.playback_status.set("Status: Loaded")
                     self.playback_status_label.configure(foreground="black")
-                    self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
-                    self._reset_edit_button()
+                    self.decoder_note.set("Settings are editable. Click Apply Settings to rebuild decoder.")
 
                     self.reset_progress_display()
                     # self.update_rotation_label()
@@ -1036,8 +1031,7 @@ class AudioPlayerGUI:
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
                     self.playback_status.set("Status: Loaded")
                     self.playback_status_label.configure(foreground="black")
-                    self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
-                    self._reset_edit_button()
+                    self.decoder_note.set("Settings are editable. Click Apply Settings to rebuild decoder.")
 
                     self.reset_progress_display()
                     # self.update_rotation_label()
@@ -1046,16 +1040,12 @@ class AudioPlayerGUI:
                     self.set_loading(False)
                     if result.get("order_warning"):
                         messagebox.showwarning("Order Clamped", result["order_warning"])
-                    # make sure decoder settings are disabled if we only updated the decoder, because this only gets called on a play
-                    self.set_decoder_settings_enabled(False)
                     self.update_info()
 
                 elif message_type == "decoder_update_error":
                     # Decoder update failed, but the player is still loaded.
                     # Restore UI without stopping the player.
                     self.set_loading(False)
-                    self._reset_edit_button()
-                    self.set_decoder_settings_enabled(self.has_loaded_player())
                     self.pipeline_status.set("Pipeline: decoder update failed")
                     self.playback_status.set("Status: Decoder update failed")
                     self.playback_status_label.configure(foreground="red")
@@ -1096,7 +1086,7 @@ class AudioPlayerGUI:
 
         try:
             self.player.play()
-            self.set_decoder_settings_enabled(False)
+            self._update_apply_button()
             self.playback_status.set("Status: Playing")
             self.playback_status_label.configure(foreground="black")
             self.update_info()
@@ -1109,6 +1099,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.pause()
+            self._update_apply_button()
             self.playback_status.set("Status: Paused")
             self.update_info()
         except Exception as error:
@@ -1119,7 +1110,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.stop()
-            self.set_decoder_settings_enabled(True)
+            self._update_apply_button()
             self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
             self.time_text.set(
