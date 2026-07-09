@@ -8,3 +8,4 @@ pooch
 pyshroom
 python-osc
 mido
+pyheadtracker

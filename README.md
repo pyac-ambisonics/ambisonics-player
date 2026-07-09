@@ -37,7 +37,6 @@ ambisonics-player/
   requirements.txt             Python dependencies
   spherical.py                 spherical-harmonic HRTF decoding and rotation hook
   utils.py                     channel/order and FFT helper functions
-  mido
 ```
 
 ## Setup
@@ -74,11 +73,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Install pyheadtracker separately without it's dependencies. This is important because it will avoid an error produced by one unnecessary dependency:
-
-```powershell
-python -m pip install pyheadtracker --no-deps
-```
+If you encounter an error relative to the installation of ```python-rtmidi``` upon excecuting the last command, you need to install Microsoft Visual C++ 14.x. You can download the installer from here: https://visualstudio.microsoft.com/de/downloads/?q=build+tools. Once done, run ```pip install -r requirements.txt``` again.
 
 ## Run
 
