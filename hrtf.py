@@ -3,8 +3,8 @@ import pyfar as pf
 import numpy as np
 import pooch
 import spharpy
-import scipy.signal as sgn
 import shroom.utils.math_utils as sh_util
+from utils import resolve_path
 
 class HRTF:
     """
@@ -44,7 +44,7 @@ class HRTF:
         internet using `load_hrtf_from_web()`.
         """
         self.app_dir = Path(__file__).resolve().parent
-        self.path = self.resolve_path(path)
+        self.path = resolve_path(path)
 
         # load HRTF from files
         self.hrirs, self.sources = self.load_HRTF()
@@ -63,25 +63,6 @@ class HRTF:
 
         # store the current HP filter name
         self.current_filter = None
-
-    def resolve_path(self, path):
-        if path is None:
-            path = self.DEFAULT_HRTF_FILE
-
-        try:
-            candidate = Path(path)
-        except TypeError as error:
-            print(f"Couldn't parse path: {path}. {error}")
-            return None
-
-        if candidate.is_absolute():
-            return candidate
-
-        local_candidate = self.app_dir / candidate
-        if local_candidate.exists():
-            return local_candidate
-
-        return candidate
 
     def get_IR_length(self, linear=False):
         """

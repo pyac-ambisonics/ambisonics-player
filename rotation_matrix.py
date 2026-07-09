@@ -6,6 +6,7 @@ and hardswapped to make the rotation faster and make realtime computation achiev
 import numpy as np
 import shroom.utils.rotation_utils as rot_utils
 from pathlib import Path
+from utils import resolve_path
 
 class RotationMatrix:
     """
@@ -34,7 +35,7 @@ class RotationMatrix:
         f = p / file
 
         # load the small d dictionary
-        self.small_d = self._load_small_d(f)
+        self.small_d = self._load_small_d(resolve_path(f))
 
         # build all unitary transofrmation matrices as well as their Hermitian transpose for query later
         self.unitary = {}
@@ -43,6 +44,7 @@ class RotationMatrix:
             self.unitary[order] = self.build_complex_to_real_transform(order)
             # conjugate transpose -> Hermitian transpose
             self.unitary_H[order] = self.unitary[order].conj().T
+
 
     
     def _load_small_d(self, file: Path):
