@@ -1441,7 +1441,15 @@ class AudioPlayerGUI:
             except Exception:
                 print("Player didn't close cleanly!")
                 pass
+        self.emtpy_and_close_cache()
         self.root.destroy()
+
+    def emtpy_and_close_cache(self):
+        """
+        Empties and closes all cached SH objects
+        """
+        for hrtf, sh in self._decoder_cache.values:
+            sh.close()
 
     def run(self):
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
