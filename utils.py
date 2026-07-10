@@ -1,11 +1,28 @@
 # Utility functions for Ambisonics processing.
-
-
 import logging
 import numpy as np
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+def resolve_path(path):
+        if path is None:
+            return None
+
+        try:
+            candidate = Path(path)
+        except TypeError as error:
+            print(f"Couldn't parse path: {path}. {error}")
+            return None
+
+        if candidate.is_absolute():
+            return candidate
+
+        local_candidate = Path(__file__).resolve().parent / candidate
+        if local_candidate.exists():
+            return local_candidate
+
+        return candidate
 
 def ambix_channels_to_order(num_channels: int) -> int:
     """

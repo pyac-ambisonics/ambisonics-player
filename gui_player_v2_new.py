@@ -637,7 +637,13 @@ class AudioPlayerGUI:
         hp_dir = self.app_dir / "resources" / "Headphones"
         if not hp_dir.exists():
             return ["None"]
-        return ["None"] + ["Diffuse Field Equalization"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
+
+        # check if the selected hrtf is defualt FABIAN
+        if self.hrtf_path_value.get() == "Default FABIAN HRTF" or "FABIAN_HRIR_measured_" in self.hrtf_path_value.get():
+            return ["None"] + ["Diffuse Field Equalization"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
+        
+        # if not, we only give None and DFE as options
+        return ["None"] + ["Diffuse Field Equalization"]
 
     def select_hrtf_file(self):
         file_path = filedialog.askopenfilename(
@@ -646,6 +652,9 @@ class AudioPlayerGUI:
         )
         if file_path:
             self.hrtf_path_value.set(file_path)
+            # update headphone filter options
+            self.headphone_box.configure(values=self.get_headphone_names())
+
 
     def show_wav_disabled_message(self):
         messagebox.showinfo(

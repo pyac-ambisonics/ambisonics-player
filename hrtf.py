@@ -3,8 +3,8 @@ import pyfar as pf
 import numpy as np
 import pooch
 import spharpy
-import scipy.signal as sgn
 import shroom.utils.math_utils as sh_util
+from utils import resolve_path
 
 class HRTF:
     """
@@ -25,6 +25,8 @@ class HRTF:
         Source coordinate array associated with `hrirs`.
     """
 
+    DEFAULT_HRTF_FILE = "FABIAN_HRIR_measured_HATO_0.sofa"
+
     def __init__(self, path=None):
         """
         Initialize an `HRTF` instance and load HRTF data. Initialize a list of available headphone
@@ -42,7 +44,9 @@ class HRTF:
         internet using `load_hrtf_from_web()`.
         """
         self.app_dir = Path(__file__).resolve().parent
-        self.path = self.resolve_path(path)
+        if path is None:    
+            path = self.DEFAULT_HRTF_FILE
+        self.path = resolve_path(path)
 
         # load HRTF from files
         self.hrirs, self.sources = self.load_HRTF()
@@ -52,30 +56,15 @@ class HRTF:
         self.resources = self.app_dir / "resources"
         self.hp_dir = self.resources / "Headphones"
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
-        self.hp_list = [x.name for x in hp_subdir]
+        # check if this is the FABIAN HRTF Dataset. in that case we have headphone filters for it
+        if self.path.name == self.DEFAULT_HRTF_FILE:
+            self.hp_list = [x.name for x in hp_subdir]
+        else:
+            self.hp_list = []
         self.hp_list.append("Diffuse Field Equalization")
 
         # store the current HP filter name
         self.current_filter = None
-
-    def resolve_path(self, path):
-        if path is None:
-            return None
-
-        try:
-            candidate = Path(path)
-        except TypeError as error:
-            print(f"Couldn't parse path: {path}. {error}")
-            return None
-
-        if candidate.is_absolute():
-            return candidate
-
-        local_candidate = self.app_dir / candidate
-        if local_candidate.exists():
-            return local_candidate
-
-        return candidate
 
     def get_IR_length(self, linear=False):
         """
@@ -223,7 +212,6 @@ class HRTF:
             
         # apply headphone filter to hrirs
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, hp_filter, mode='full')
-        print(f"Samplelength of HRIR: {self.get_IR_length()}")
         self.current_filter = name
         return hp_filter
     
@@ -248,7 +236,6 @@ class HRTF:
         # convolve hrirs with the dfe filter
         self.hrirs = pf.dsp.convolve(self.hrirs_linear, min_phase_dfe, mode='full')
 
-        print(f"Samplelength of HRIR: {self.get_IR_length()}")
         return min_phase_dfe
 
     
@@ -419,16 +406,10 @@ class Processing:
                 # above cutoff: do least squares, magnitude from original, phase from min-phase
                 nm_magls[ear, :, f] = (
                     # use shroom library for speed
-                    # only returns real numbers????
                     alpha[f] * sh_util.magls(A=sh_basis, 
                                              b=hrirs_freq[:, ear, f], 
                                              x_prev=nm_magls[ear, :, f-1]
                                              )
-                    # our own solution
-                    # alpha[f] * self.__mag_ls_solver(Y=sh_basis, 
-                    #                                 target=hrirs_freq[:, ear, f], 
-                    #                                 x_prev=nm_magls[ear, :, f-1]
-                    #                                 )
                     + (1 - alpha[f]) * hrirs_sh[ear, :, f]
                 )
         

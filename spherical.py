@@ -57,6 +57,8 @@ class SphericalHarmonics:
         ambi_order : int, optional
             Ambisonic order used for the spherical-harmonic decomposition.
         """
+        start = time.time()
+        
         # # set the hrtf. this should be a pyfar signal!
         # self.hrtf = hrtf
 
@@ -90,20 +92,18 @@ class SphericalHarmonics:
         # create the spherical harmonics object from definition and sampling sphere
         self.spherical_harmonics = sh.SphericalHarmonics.from_definition(self.sh_definition, 
                                                                          self.sources, 
-                                                                         inverse_method="pseudo_inverse"
+                                                                        #  inverse_method="pseudo_inverse"
                                                                          )
 
         # create hrtf processing unit
         self.process = Processing()
 
-        start = time.time()
         # create h_nm matrix 
         hrirs_nm = self.process.apply_preprocessing(self.hrtf.hrirs, 
                                                self.spherical_harmonics,
                                                algorithm='MagLS'
                                                )
         
-        print(f"Doing HRTF preprocessing took {time.time() - start:.2f}s")
         print("Convert to Spherical Harmonic Signal")
         self.hrir_nm = sh.SphericalHarmonicSignal.from_definition(self.sh_definition, 
                                                                    hrirs_nm.time, 
@@ -140,6 +140,7 @@ class SphericalHarmonics:
 
         # prepare pre_gain for gianstaging
         self.pre_gain = self._find_gain()
+        print(f"Setting up Spherical Harmonics took {time.time() - start:.2f}s")
 
     def update_order(self, order: int, block_size=None):
         # create a spherical harmonics definition, corresponding to the AmbiX convention
@@ -272,7 +273,7 @@ class SphericalHarmonics:
             self._last_rotation = rotation
             # compute wigner D matrix
             alpha, beta, gamma = rotation.as_euler("zyz")
-            new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+            new_D = self.rotation.real_wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
     
             # using the fft, since we expect this to be faster than time domain
             # 3. Apply rotation
