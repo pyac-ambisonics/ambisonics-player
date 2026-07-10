@@ -1448,7 +1448,7 @@ class AudioPlayerGUI:
         """
         Empties and closes all cached SH objects
         """
-        for hrtf, sh in self._decoder_cache.values:
+        for hrtf, sh in self._decoder_cache.values():
             sh.close()
 
     def run(self):
