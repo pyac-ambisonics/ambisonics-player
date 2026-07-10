@@ -71,7 +71,7 @@ class AudioPlayerGUI:
 
         # Rotation and head tracking demo state
         self.orientation_state = OrientationState()
-        self.demo_tracker = DemoHeadTracker(self.orientation_state)
+        self.demo_tracker = DemoHeadTracker(self.orientation_state, 90)
         self.head_tracker = HeadTracker(self.orientation_state)
         self.rotation_tracker = self.demo_tracker
         self.head_tracker_devices = []
