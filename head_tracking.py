@@ -30,6 +30,10 @@ class OrientationState:
     def get(self):
         with self._lock:
             return self._orientation
+        
+    #def get_ypr(self):
+    #    _orientation = self.get()
+    #    return [_orientation.yaw, _orientation.pitch, _orientation.roll]
 
 
 class DemoHeadTracker:
@@ -137,7 +141,7 @@ class HeadTracker:
         self.ht = pht.supperware.HeadTracker1(
             device_name=next(MIDIdevice for MIDIdevice in mido.get_input_names() if "Head Tracker" in MIDIdevice),
             device_name_output=next(MIDIdevice for MIDIdevice in mido.get_output_names() if "Head Tracker" in MIDIdevice),
-            refresh_rate=25,
+            refresh_rate=refresh_rate,
             compass_on=True,
             orient_format="ypr",
             gestures_on="off",

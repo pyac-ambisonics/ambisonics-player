@@ -3,7 +3,6 @@ import os
 import threading
 import traceback
 import tkinter as tk
-import mido
 from pathlib import Path
 from queue import Queue
 from tkinter import filedialog, messagebox
@@ -14,6 +13,7 @@ from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
+from visualiser import Obj
 
 
 class AudioPlayerGUI:
@@ -449,18 +449,21 @@ class AudioPlayerGUI:
         self.tracking_canvas = tk.Canvas(
             card,
             width=170,
-            height=130,
+            height=200,
             bg="white",
             highlightthickness=1,
             highlightbackground="#d8d8d8",
         )
-        self.tracking_canvas.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        self.tracking_canvas.grid(row=1, column=5, rowspan=4, columnspan=2, sticky="w", pady=(14, 0))
 
         ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
             row=6, column=4, columnspan=2, sticky="e", padx=(18, 0), pady=(14, 0)
         )
 
-        self.draw_head_tracking_visualizer(self.orientation_state.get())
+        # create visualiser instance form .obj file and draw the object
+        self._visualiser = Obj("./resources/virtualhead.obj", self.tracking_canvas, 
+                               position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
+                            )
 
         card.columnconfigure(1, weight=1)
         card.columnconfigure(2, weight=0)
@@ -1200,8 +1203,7 @@ class AudioPlayerGUI:
                 self.apply_orientation_to_audio(orientation)
 
     def update_head_tracking_loop(self):
-        # !query both trackers for orientation - inefficient code!
-        if self.rotation_tracker.is_running():
+        if self.rotation_tracker.is_running(): #comment for testing purposes
             orientation = self.rotation_tracker.orientation_state.get()
         
             self.yaw_value.set(orientation.yaw)
@@ -1212,28 +1214,11 @@ class AudioPlayerGUI:
             self.draw_head_tracking_visualizer(orientation)
             self.apply_orientation_to_audio(orientation)
 
-        self.root.after(50, self.update_head_tracking_loop)
+        self.root.after(50, self.update_head_tracking_loop) # Not part of the if!!
 
     def draw_head_tracking_visualizer(self, orientation):
-        canvas = self.tracking_canvas
-        canvas.delete("all")
-
-        width = int(canvas["width"])
-        height = int(canvas["height"])
-        cx = width // 2
-        cy = height // 2 + 8
-        radius = 34
-
-        # Tkinter coordinates grow downward. Positive yaw rotates clockwise here.
-        angle = math.radians(orientation.yaw - 90.0)
-        arrow_length = 48
-        ax = cx + arrow_length * math.cos(angle)
-        ay = cy + arrow_length * math.sin(angle)
-
-        canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, outline="#14395b", width=2)
-        canvas.create_line(cx, cy, ax, ay, fill="#14395b", width=3, arrow=tk.LAST)
-        canvas.create_text(cx, 14, text="Head direction", fill="#444444", font=("Arial", 9, "bold"))
-        canvas.create_text(cx, height - 12, text=f"yaw {orientation.yaw:.1f} deg", fill="#444444", font=("Arial", 9))
+        ypr = [orientation.yaw, orientation.pitch, orientation.roll]
+        self._visualiser.draw(rotation=ypr)
 
     # ==============================================================
     # Info update
