@@ -13,7 +13,7 @@ from audio_player import AudioPlayer
 from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
 from hrtf import HRTF
 from spherical import SphericalHarmonics
-from visualiser import Obj
+from visualizer import Obj
 
 
 class AudioPlayerGUI:
@@ -83,6 +83,7 @@ class AudioPlayerGUI:
         # self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(value="Hardware tracking status: not checked.")
         self.tracking_mode = tk.StringVar(value="Off")
+        self.chirality = tk.StringVar(value="left")
         self.tracking_status = tk.StringVar(value="Tracking: Off")
         self.tracking_angles = tk.StringVar(value="Yaw 0.0 | Pitch 0.0 | Roll 0.0")
 
@@ -392,7 +393,7 @@ class AudioPlayerGUI:
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(card, textvariable=self.rotation_note, style="SmallInfo.TLabel").grid(
-            row=0, column=2, columnspan=4, sticky="e", padx=(16, 0)
+            row=0, column=3, columnspan=4, sticky="e", padx=(16, 0)
         )
 
         self.yaw_slider = self.create_rotation_slider(card, "Yaw Z", self.yaw_value, 1)
@@ -405,9 +406,9 @@ class AudioPlayerGUI:
         self.reset_rotation_button = ttk.Button(card, text="Reset Rotation", command=self.reset_rotation)
         self.reset_rotation_button.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(16, 0))
 
-        ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
-            row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
-        )
+        #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
+        #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
+        #)
 
         # ttk.Label(card, textvariable=self.rotation_backend_text, style="SmallInfo.TLabel").grid(
         #     row=4, column=4, columnspan=2, sticky="e", pady=(16, 0)
@@ -425,30 +426,38 @@ class AudioPlayerGUI:
         )
         self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(16, 0))
 
+        ttk.Label(card, text="Head tracker cable on ", background="white", font=("Arial", 10)).grid(
+            row=5, column=2, sticky="w", pady=(16, 0)
+        )
+        self.chirality_box = ttk.Combobox(
+            card,
+            textvariable=self.chirality,
+            values=["left", "right"],
+            state="disabled",
+            width=5,
+        )
+        self.chirality_box.grid(row=5, column=3, sticky="w", padx=(14, 12), pady=(16, 0))
+
         self.refresh_tracker_button = ttk.Button(
             card,
             text="Refresh Devices",
             command=self.refresh_hardware_tracking_status,
         )
-        self.refresh_tracker_button.grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.refresh_tracker_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
 
-        self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", command=self.head_tracker.zero)
-        self.zero_tracker_button.grid(row=5, column=3, sticky="w", padx=(0, 8), pady=(16, 0))
-        self.zero_tracker_button["state"] = "disabled"
+        self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", state="disabled", command=self.head_tracker.zero)
+        self.zero_tracker_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(16, 0))
 
-        self.start_tracking_button = ttk.Button(card, text="Start Tracking", command=self.start_head_tracking)
-        self.start_tracking_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.start_stop_tracking_button = ttk.Button(card, text="Start Tracking", state="disabled", command=self.start_stop_callback)
+        self.start_stop_tracking_button.grid(row=5, column=6, sticky="w", padx=(0, 8), pady=(16, 0))
 
-        self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
-        self.stop_tracking_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(16, 0))
-
-        ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
-            row=6, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(14, 0)
-        )
+        #self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
+        #self.stop_tracking_button.grid(row=5, column=7, sticky="w", padx=(0, 8), pady=(16, 0))
+        #self.stop_tracking_button["state"] = "disabled"
 
         self.tracking_canvas = tk.Canvas(
             card,
-            width=170,
+            width=200,
             height=200,
             bg="white",
             highlightthickness=1,
@@ -456,12 +465,18 @@ class AudioPlayerGUI:
         )
         self.tracking_canvas.grid(row=1, column=5, rowspan=4, columnspan=2, sticky="w", pady=(14, 0))
 
-        ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
-            row=6, column=4, columnspan=2, sticky="e", padx=(18, 0), pady=(14, 0)
+        ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
+            row=6, column=0, columnspan=2, sticky="w", padx=(0, 0), pady=(14, 0)
         )
 
-        # create visualiser instance form .obj file and draw the object
-        self._visualiser = Obj("./resources/virtualhead.obj", self.tracking_canvas, 
+        ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
+            row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(14, 0)
+        )
+
+        self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(False))
+
+        # create visualizer instance form .obj file and draw the object
+        self._visualizer = Obj("./resources/virtualhead.obj", self.tracking_canvas, 
                                position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
                             )
 
@@ -534,6 +549,16 @@ class AudioPlayerGUI:
         self.info_text.configure(yscrollcommand=scrollbar.set)
         self.info_text.configure(state="disabled")
         self.write_info_text("No audio loaded.")
+
+    # ==============================================================
+    # Callback functions
+    # ==============================================================
+
+    def start_stop_callback(self):
+        if self.start_stop_tracking_button["text"]=="Start Tracking":
+            self.start_head_tracking()            
+        else:
+            self.stop_head_tracking(False)
 
     # ==============================================================
     # State helpers
@@ -1171,26 +1196,40 @@ class AudioPlayerGUI:
                 return
 
         try:
-            self.rotation_tracker.start()
+            if self.tracking_mode.get() == "Hardware":
+                self.rotation_tracker.start(chirality=self.chirality.get())
+                self.zero_tracker_button["state"] = "normal"
+            else:
+                self.rotation_tracker.start()
+            self.start_stop_tracking_button["text"] = "Stop Tracking"
+
         except Exception as error:
             self.tracking_status.set("Tracking: failed to start")
             print(f"[Head Tracking Error] {error}")
             traceback.print_exc()
             messagebox.showerror("Head Tracking Error", str(error))
             return
-        
-        if self.tracking_mode.get() == "Hardware" and self.rotation_tracker.is_running():
-            # should only do this on successful start ....
-            self.zero_tracker_button["state"] = "normal"
 
-        self.tracking_status.set("Tracking: " + self.tracking_mode.get() + " running")
+        self.tracking_status.set(self.tracking_mode.get() + "head tracking is running")
         self.playback_status.set("Status: " + self.tracking_mode.get() + " tracking")
 
     def stop_head_tracking(self, reset_orientation=True):
         self.rotation_tracker.stop()
+        self.start_stop_tracking_button["text"] = "Start Tracking"
+        self.start_stop_tracking_button["state"] = "enabled"
+        #self.stop_tracking_button["state"] = "disabled"
         self.zero_tracker_button["state"] = "disabled"
-        self.tracking_mode.set("Off")
-        self.tracking_status.set("Tracking: Off")
+        self.chirality_box["state"] = "disabled"
+        self.tracking_status.set("Head tracking is off")
+
+        match self.tracking_mode.get():
+            case "Demo":
+                self.rotation_tracker = self.demo_tracker
+            case "Hardware":
+                self.rotation_tracker = self.head_tracker
+                self.chirality_box["state"] = "readonly"
+            case "Off":
+                self.start_stop_tracking_button["state"] = "disabled"
 
         if reset_orientation:
             orientation = self.orientation_state.set(0.0, 0.0, 0.0, source="off")
@@ -1203,7 +1242,7 @@ class AudioPlayerGUI:
                 self.apply_orientation_to_audio(orientation)
 
     def update_head_tracking_loop(self):
-        if self.rotation_tracker.is_running(): #comment for testing purposes
+        if self.rotation_tracker.is_running():
             orientation = self.rotation_tracker.orientation_state.get()
         
             self.yaw_value.set(orientation.yaw)
@@ -1214,11 +1253,11 @@ class AudioPlayerGUI:
             self.draw_head_tracking_visualizer(orientation)
             self.apply_orientation_to_audio(orientation)
 
-        self.root.after(50, self.update_head_tracking_loop) # Not part of the if!!
+        self.root.after(50, self.update_head_tracking_loop)
 
     def draw_head_tracking_visualizer(self, orientation):
         ypr = [orientation.yaw, orientation.pitch, orientation.roll]
-        self._visualiser.draw(rotation=ypr)
+        self._visualizer.draw(rotation=ypr)
 
     # ==============================================================
     # Info update
