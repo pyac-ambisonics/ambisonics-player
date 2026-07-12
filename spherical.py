@@ -122,8 +122,8 @@ class SphericalHarmonics:
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
         self.hrir_nm_rot = None
         self._D = None
-        self._last_rotation = Rotation.from_euler('xyz', (0, 0, 0))
-        self.atol = np.deg2rad(2)
+        self._last_rotation = Rotation.from_euler('zyx', (0, 0, 0))
+        self.atol = np.deg2rad(1)
 
         self._rotation_lock = threading.Lock()
         self._rotation_queue = queue.Queue(maxsize=1)
@@ -141,7 +141,7 @@ class SphericalHarmonics:
         self.update_rotation_matrix([0, 0, 0])
 
         # prepare pre_gain for gianstaging
-        self.pre_gain = self._find_gain()
+        self.pre_gain = 0.1
         print(f"Setting up Spherical Harmonics took {time.time() - start:.2f}s")
 
     def update_order(self, order: int, block_size=None):
@@ -174,11 +174,6 @@ class SphericalHarmonics:
         if block_size is None:
             block_size = utils.next_power_of_two(self.get_IR_length())
         self.update_hrirs_fft(block_size)
-
-        # prepare pre_gain for gianstaging
-        self.pre_gain = self._find_gain()
-        
-
         
     def get_IR_length(self):
         """
@@ -491,39 +486,6 @@ class SphericalHarmonics:
             if self._rotation_thread.is_alive():
                 print("Warning: Rotation thread did not terminate cleanly.")
     
-    # find a good gain to apply to the stereo signal, based on the ambisonics order
-    def _find_gain(self):
-        """
-        Compute a pre-gain factor for ambisonic-to-binaural rendering.
-
-        The method uses a simple empirical estimate (base ~4 dB, dependant on 
-        HRTF Preprocessing Algorithm) and scales it with the square root of the 
-        number of ambisonic channels to account for incoherent summation. The 
-        returned value is a linear gain (not dB) that can be multiplied with the 
-        rendered stereo signals before clipping checks and any user gain is applied.
-
-        Returns
-        -------
-        float
-            Linear gain factor to apply (positive scalar, typically < 1).
-        """
-
-        # thought process: 2 uncorrelated signals sum to +3dB
-        # 2 identical signals sum to +6dB
-        # so probably ours would sum to around +4.5dB? testing showed that 4 is good so far
-        # for each doubling of summed channels, this number is also doubled
-        estimate = 4
-
-        # estimate is then adjusted, depending on the HRTF preprocessing algorithm used
-        i = self.process.get_gain()
-        estimate *= i
-
-        # by taking the square-root of the ambisonics order
-        # we get the doubling-factor to apply to our estimate
-        estimate *= np.sqrt(utils.order_to_channel_n(self.ambi_order))
-        # B = 1 / 10^(estimate/20)
-        return 1 / np.pow(10, estimate * 0.05, dtype=np.float32)
-    
     # test if  the channels are clipping
     def test_clipping(self, channels):
         """
@@ -548,8 +510,8 @@ class SphericalHarmonics:
             # test for clipping
             if np.max(channel) >= 1:
                 print("\n####################\n" \
-                "WARNING! WARNING" \
-                "clipping detected!\n" \
+                "WARNING! WARNING!\n" \
+                f"Clipping detected!\n" \
                 "####################")
 
     def set_atol(self, atol):
