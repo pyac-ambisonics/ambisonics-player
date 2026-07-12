@@ -11,7 +11,7 @@ from utils import resolve_path
 class RotationMatrix:
     """
     A class prividing functionality to calculate Wigner-D rotation matrices. The class gives functionality to precalculate a set of
-    Wigner small-d matrices, save them to a file, load that file and calculate Wigner-D matrices based on the rpecalculated small-d matrices.
+    Wigner small-d matrices, save them to a file, load that file and calculate Wigner-D matrices based on the precalculated small-d matrices.
     
     Copyright (c) 2026 Kylan Klein Lenderink
 
@@ -110,7 +110,7 @@ class RotationMatrix:
         This implementation is taken from @Yhonatangayers implementation
         in the pyshroom package. It has been adapted for use with precalculated
         small_d matrices as per the terms of the MIT Licence, which the pyshroom
-        package is licensed udner.
+        package is licensed under.
 
 
         The matrix D rotates SH coefficients such that:

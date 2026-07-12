@@ -1,9 +1,9 @@
 import math
 import threading
 import time
-from dataclasses import dataclass
-
+import mido
 import pyheadtracker as pht
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,10 @@ class OrientationState:
     def get(self):
         with self._lock:
             return self._orientation
+        
+    #def get_ypr(self):
+    #    _orientation = self.get()
+    #    return [_orientation.yaw, _orientation.pitch, _orientation.roll]
 
 
 class DemoHeadTracker:
@@ -106,38 +110,40 @@ class HeadTracker:
         self.ht = None
 
     def is_available(self):
-        return pht is not None
+        return (any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) 
+            and any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_output_names())
+        )
 
-    # parameters are specific for the Supperware Headtracker 1 and should be changed for use with a different hardware
+    # this function is designed to work specifically with the Supperware Headtracker 1 and should be changed for use with a different hardware
     def start(
         self,
-        device_name="Head Tracker 1",
-        device_name_output="Head Tracker 2",
+        in_device_name=None,
+        out_device_name=None,
         refresh_rate=25,
+        chirality="preserve"
     ):
         """
         Start hardware head tracking.
 
-        The device names can be passed in from the GUI instead of being hardcoded.
-        This makes the tracker more robust on machines with different MIDI device names.
+        The device names can be passed in from the GUI. If not, they will automatically be set by searching among the available MIDI devices.
         """
-
-        if pht is None:
-            raise RuntimeError(
-                "pyheadtracker is not installed. Install requirements or use Demo tracking."
-            )
 
         if self._running:
             return
 
+        if not in_device_name:
+            in_device_name=next(MIDIdevice for MIDIdevice in mido.get_input_names() if "Head Tracker" in MIDIdevice)
+        if not out_device_name:
+            out_device_name=next(MIDIdevice for MIDIdevice in mido.get_output_names() if "Head Tracker" in MIDIdevice)
+
         self.ht = pht.supperware.HeadTracker1(
-            device_name=device_name,
-            device_name_output=device_name_output,
+            device_name=in_device_name,
+            device_name_output=out_device_name,
             refresh_rate=refresh_rate,
             compass_on=True,
             orient_format="ypr",
             gestures_on="off",
-            chirality="preserve",
+            chirality=chirality
         )
 
         self.ht.open()

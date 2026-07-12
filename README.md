@@ -37,7 +37,6 @@ ambisonics-player/
   requirements.txt             Python dependencies
   spherical.py                 spherical-harmonic HRTF decoding and rotation hook
   utils.py                     channel/order and FFT helper functions
-  mido
 ```
 
 ## Setup
@@ -73,6 +72,8 @@ Install dependencies:
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
+
+If you encounter an error relative to the installation of ```python-rtmidi``` upon excecuting the last command, you need to install Microsoft Visual C++ 14.x. You can download the installer from here: https://visualstudio.microsoft.com/de/downloads/?q=build+tools. Once done, run ```pip install -r requirements.txt``` again.
 
 ## Run
 
