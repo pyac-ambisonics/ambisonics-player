@@ -44,7 +44,7 @@ class AmbisonicsFile:
         format: str = "ambix",
         normalization: str = "SN3D",
     ):
-         """
+        """
         Open an Ambisonics WAV file for chunked streaming.
 
         Parameters
@@ -230,7 +230,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _setup_channel_layout(self, trim_extra_channels: bool):
-         """Determine which source channels map to the current Ambisonics order.
+        """Determine which source channels map to the current Ambisonics order.
 
         When the file has more channels than ``(order+1)^2`` and
         *trim_extra_channels* is True, the extra trailing channels are
@@ -279,7 +279,7 @@ class AmbisonicsFile:
         start_sample: int,
         num_samples: Optional[int] = None
     ) -> np.ndarray:
-         """Read a block of audio frames from the underlying WAV file.
+        """Read a block of audio frames from the underlying WAV file.
 
         Only channels flagged as valid (see ``_setup_channel_layout``) are
         returned.  When the normalisation is ``"N3D"``, per-ACN SN3D→N3D
@@ -442,7 +442,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def seek_to_position(self, position_samples: int):
-         """Move the streaming read pointer to an absolute sample index.
+        """Move the streaming read pointer to an absolute sample index.
 
         The value is clamped to ``[0, total_frames]``.
 
@@ -482,7 +482,7 @@ class AmbisonicsFile:
         self.seek_to_position(position)
 
     def reset_position(self):
-         """Reset the streaming read pointer to the beginning of the file."""
+        """Reset the streaming read pointer to the beginning of the file."""
         self._current_position = 0
 
     def get_current_position(self) -> int:
@@ -502,7 +502,7 @@ class AmbisonicsFile:
         return self.duration
 
     def get_samplerate(self) -> int:
-         """Return the sample rate in Hz."""
+        """Return the sample rate in Hz."""
         return self.samplerate
 
     def get_order(self) -> int:
@@ -514,7 +514,7 @@ class AmbisonicsFile:
         return self.format
 
     def get_num_channels(self) -> int:
-         """Return the number of valid (non-empty) audio channels.
+        """Return the number of valid (non-empty) audio channels.
 
         When extra channels have been trimmed this is ``(order+1)^2``;
         otherwise it equals ``get_total_channels``.
@@ -526,7 +526,7 @@ class AmbisonicsFile:
         return self.num_channels
 
     def get_total_channels(self) -> int:
-         """Return the total number of channels in the source file."""
+        """Return the total number of channels in the source file."""
         return self.num_channels
 
     def get_chunk_size(self) -> int:
@@ -564,7 +564,7 @@ class AmbisonicsFile:
         return chunk_size
 
     def set_chunk_size(self, chunk_size: int):
-         """Update the streaming chunk size.
+        """Update the streaming chunk size.
 
         The value is normalised via ``_normalize_chunk_size``, so it will
         be clamped and rounded to a power of two.
@@ -603,7 +603,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def get_channel_info(self) -> dict:
-         """Return a dictionary summarising the channel layout.
+        """Return a dictionary summarising the channel layout.
 
         Keys: total_channels, valid_channels, empty_channels,
         effective_channels, expected_channels, has_extra_channels.
@@ -651,7 +651,7 @@ class AmbisonicsFile:
         self.close()
 
     def __repr__(self):
-         """Return a compact string representation for debugging."""
+        """Return a compact string representation for debugging."""
         return (
             f"AmbisonicsFile(format={self.format}, norm={self.normalization}, order={self.order}, "
             f"channels={self.get_num_channels()}, "
@@ -660,5 +660,5 @@ class AmbisonicsFile:
         )
 
     def __len__(self):
-          """Return the total number of frames in the file."""
+        """Return the total number of frames in the file."""
         return self.total_frames
