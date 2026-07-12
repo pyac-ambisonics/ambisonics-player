@@ -44,6 +44,30 @@ class AmbisonicsFile:
         format: str = "ambix",
         normalization: str = "SN3D",
     ):
+         """
+        Open an Ambisonics WAV file for chunked streaming.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the Ambisonics WAV file.
+        chunk_size : int
+            Number of samples per streaming chunk (clamped to [32, 8192],
+            rounded up to the nearest power of two).  Default 2048.
+        order : int or None
+            Ambisonics order to decode.  When ``None`` (default), the order
+            is auto-detected from the channel count via
+            ``ambix_channels_to_order``.
+        trim_extra_channels : bool
+            When True (default), trailing channels beyond the expected
+            ``(order+1)^2`` are discarded.  Set to False to keep all
+            channels (may break decoding if extra channels are present).
+        format : str
+            Ambisonics format — ``"ambix"`` (ACN/SN3D, default) or
+            ``"fuma"`` (WXY/Furse-Malham).
+        normalization : str
+            Channel normalisation — ``"SN3D"`` (default) or ``"N3D"``.
+        """
 
         if format not in self._SUPPORTED_FORMATS:
             raise ValueError(
@@ -175,6 +199,19 @@ class AmbisonicsFile:
         )
 
     def set_order(self, order: int):
+        """
+        Change the Ambisonics playback order.
+
+        If the requested *order* exceeds what the current file supports
+        (requires ``(order+1)^2`` channels), it is silently clamped to the
+        highest valid order.  The channel layout is re-evaluated and extra
+        trailing channels are trimmed.
+
+        Parameters
+        ----------
+        order : int
+            Desired Ambisonics order (non-negative).
+        """
         if order < 0:
             raise ValueError("Order must be non-negative.")
         
@@ -193,6 +230,18 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _setup_channel_layout(self, trim_extra_channels: bool):
+         """Determine which source channels map to the current Ambisonics order.
+
+        When the file has more channels than ``(order+1)^2`` and
+        *trim_extra_channels* is True, the extra trailing channels are
+        flagged as empty and excluded from reads.  When the file has too few
+        channels a ``ValueError`` is raised.
+
+        Parameters
+        ----------
+        trim_extra_channels : bool
+            Whether to discard trailing channels beyond the expected count.
+        """
         expected_channels = (self.order + 1) ** 2
 
         if self.num_channels == expected_channels:
@@ -230,7 +279,24 @@ class AmbisonicsFile:
         start_sample: int,
         num_samples: Optional[int] = None
     ) -> np.ndarray:
+         """Read a block of audio frames from the underlying WAV file.
 
+        Only channels flagged as valid (see ``_setup_channel_layout``) are
+        returned.  When the normalisation is ``"N3D"``, per-ACN SN3D→N3D
+        scaling is applied in-place.
+
+        Parameters
+        ----------
+        start_sample : int
+            Zero-based sample index to seek to before reading.
+        num_samples : int or None
+            Number of samples to read.  When ``None``, defaults to the
+            current chunk size.
+
+        Returns
+        -------
+        data : ndarray of shape ``(num_samples, num_valid_channels)``, float32
+        """
         if self.file is None:
             raise RuntimeError("Cannot read frames: file is closed.")
 
@@ -294,7 +360,20 @@ class AmbisonicsFile:
     def get_next_chunk(
         self
     ) -> Tuple[Optional[np.ndarray], bool]:
+        """Read the next streaming chunk from the current file position.
 
+        Advances the internal position pointer by the number of samples
+        actually read.  If the chunk has more channels than expected for
+        the current order, extra channels are trimmed silently.
+
+        Returns
+        -------
+        chunk : ndarray of shape ``(samples, channels)`` or None
+            The next chunk of audio data, or ``None`` when the end of the
+            file has been reached.
+        end_of_file : bool
+            ``True`` if the returned chunk is the last one in the file.
+        """
         if self._current_position >= self.total_frames:
             return None, True
 
@@ -328,6 +407,21 @@ class AmbisonicsFile:
         start_sample: int,
         num_samples: Optional[int] = None
     ) -> pf.Signal:
+        """Read a block of audio and return it as a ``pyfar.Signal``.
+
+        Parameters
+        ----------
+        start_sample : int
+            Zero-based sample index to seek to before reading.
+        num_samples : int or None
+            Number of samples to read.  When ``None``, defaults to the
+            current chunk size.
+
+        Returns
+        -------
+        signal : pyfar.Signal
+            Signal in time domain with shape ``(channels, samples)``.
+        """
 
         chunk = self.get_frames(
             start_sample,
@@ -348,6 +442,15 @@ class AmbisonicsFile:
     # ==============================================================
 
     def seek_to_position(self, position_samples: int):
+         """Move the streaming read pointer to an absolute sample index.
+
+        The value is clamped to ``[0, total_frames]``.
+
+        Parameters
+        ----------
+        position_samples : int
+            Target position in samples.
+        """
 
         if position_samples < 0:
             logger.warning("Negative position %d clamped to 0", position_samples)
@@ -362,6 +465,15 @@ class AmbisonicsFile:
         self._current_position = position_samples
 
     def seek_to_time(self, time_seconds: float):
+        """Move the streaming read pointer to a time in seconds.
+
+        Wraps ``seek_to_position`` after converting seconds to samples.
+
+        Parameters
+        ----------
+        time_seconds : float
+            Target time in seconds.
+        """
 
         position = int(
             time_seconds * self.samplerate
@@ -370,6 +482,7 @@ class AmbisonicsFile:
         self.seek_to_position(position)
 
     def reset_position(self):
+         """Reset the streaming read pointer to the beginning of the file."""
         self._current_position = 0
 
     def get_current_position(self) -> int:
@@ -385,12 +498,15 @@ class AmbisonicsFile:
     # ==============================================================
 
     def get_duration(self) -> float:
+        """Return the total audio duration in seconds."""
         return self.duration
 
     def get_samplerate(self) -> int:
+         """Return the sample rate in Hz."""
         return self.samplerate
 
     def get_order(self) -> int:
+        """Return the current Ambisonics order."""
         return self.order
 
     def get_format(self) -> str:
@@ -398,6 +514,11 @@ class AmbisonicsFile:
         return self.format
 
     def get_num_channels(self) -> int:
+         """Return the number of valid (non-empty) audio channels.
+
+        When extra channels have been trimmed this is ``(order+1)^2``;
+        otherwise it equals ``get_total_channels``.
+        """
 
         if self._valid_channels is not None:
             return len(self._valid_channels)
@@ -405,9 +526,11 @@ class AmbisonicsFile:
         return self.num_channels
 
     def get_total_channels(self) -> int:
+         """Return the total number of channels in the source file."""
         return self.num_channels
 
     def get_chunk_size(self) -> int:
+        """Return the current streaming chunk size in samples."""
         return self.chunk_size
 
     def get_normalization(self) -> str:
@@ -430,7 +553,7 @@ class AmbisonicsFile:
 
     @staticmethod
     def _normalize_chunk_size(chunk_size: int) -> int:
-
+        """Clamp *chunk_size* to [32, 8192] and round up to the nearest power of two."""
         # Clamp to valid range
         chunk_size = max(32, min(8192, chunk_size))
 
@@ -441,6 +564,16 @@ class AmbisonicsFile:
         return chunk_size
 
     def set_chunk_size(self, chunk_size: int):
+         """Update the streaming chunk size.
+
+        The value is normalised via ``_normalize_chunk_size``, so it will
+        be clamped and rounded to a power of two.
+
+        Parameters
+        ----------
+        chunk_size : int
+            Desired chunk size in samples.
+        """
         self.chunk_size = self._normalize_chunk_size(chunk_size)
 
         logger.info(
@@ -453,6 +586,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def is_valid(self) -> bool:
+        """Return True if the file has exactly ``(order+1)^2`` valid channels."""
 
         effective = (
             len(self._valid_channels)
@@ -469,7 +603,11 @@ class AmbisonicsFile:
     # ==============================================================
 
     def get_channel_info(self) -> dict:
+         """Return a dictionary summarising the channel layout.
 
+        Keys: total_channels, valid_channels, empty_channels,
+        effective_channels, expected_channels, has_extra_channels.
+        """
         return {
             'total_channels': self.num_channels,
             'valid_channels': self._valid_channels,
@@ -484,6 +622,7 @@ class AmbisonicsFile:
     # ==============================================================
 
     def _print_load_info(self):
+        """Log a one-line summary of the loaded file (format, order, channels, duration, SR, chunk size)."""
         effective_channels = self.get_num_channels()
         logger.info(
             "Loaded: %s | Format: %s | Norm: %s | Order: %d | Channels: %d -> %d | "
@@ -498,18 +637,21 @@ class AmbisonicsFile:
     # ==============================================================
 
     def close(self):
-
+        """Close the underlying soundfile handle and release resources."""
         if self.file:
             self.file.close()
             self.file = None
 
     def __enter__(self):
+        """Context-manager entry — returns self."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context-manager exit — calls ``close()``."""
         self.close()
 
     def __repr__(self):
+         """Return a compact string representation for debugging."""
         return (
             f"AmbisonicsFile(format={self.format}, norm={self.normalization}, order={self.order}, "
             f"channels={self.get_num_channels()}, "
@@ -518,4 +660,5 @@ class AmbisonicsFile:
         )
 
     def __len__(self):
+          """Return the total number of frames in the file."""
         return self.total_frames
