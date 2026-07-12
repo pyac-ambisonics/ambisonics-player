@@ -1340,7 +1340,7 @@ class AudioPlayerGUI:
             self.update_rotation_label()
             self.draw_head_tracking_visualizer(orientation)
             self.apply_orientation_to_audio(orientation)
-
+        # 10 ms refresh rate allows to get all the orientation data even when the head tracker works at maximum rate (100 Hz)
         self.root.after(10, self.update_head_tracking_loop)
 
     def draw_head_tracking_visualizer(self, orientation):

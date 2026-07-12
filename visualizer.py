@@ -64,6 +64,7 @@ class Obj:
         self._point_colour = point_colour
 
         self._changed = True
+        self._polygon_ids = []
         self.draw(rotation=self._rotation)
 
     def draw(self, zoom=None, rotation=None, spin=False):
@@ -79,17 +80,13 @@ class Obj:
             else:
                 self._rotation *= 2
             self._changed = True
-        elif rotation is not None and delta>0.2: #np.any([rotation != self._rotation]):
+        elif rotation is not None and delta>0.2: # 0.2 degree threshold on any axis
             self._rotation = np.radians(rotation)
             self._changed = True
         if not self._changed:
-            return # nothing changed, so no need to re-draw
-
-        # clear the canvas to start blank
-        self._canvas.delete('all')
+            return # change below the threshold, so no need to re-draw
 
         # only calculate this once, since it's the same for all points
-        #self._rotation[1] -= np.pi/2
         rotation = self._rotation_matrix()
         C = np.array([
             [0, -1, 0],
@@ -103,14 +100,18 @@ class Obj:
 
         self._projected_points = (rotated[:2] * [[1],[-1]] * point_scales).T \
                                 + self._position
-        self._draw_projected_points()
-        self._draw_faces()
+        
+        if not self._polygon_ids:
+            self._create_faces()
+        else:
+            self._update_faces()
+
         self._changed = False
 
     def _rotation_matrix(self):
         ''' Returns the current net rotation matrix for self. '''
         yaw, pitch, roll = self._rotation
-        # match sign convention of the visualiser
+        # match the sign convention of the visualiser
         yaw = -yaw
 
         cos = Angle(np.cos(roll), np.cos(pitch), np.cos(yaw))
@@ -143,6 +144,29 @@ class Obj:
                 draw_points.extend(self._projected_points[point_index])
             self._canvas.create_polygon(draw_points, outline=self._line_colour,
                                         fill='')
+    
+    def _create_faces(self):
+        self._polygon_ids = []
+        for face in self._faces:
+            draw_points = []
+            for point_index in face:
+                draw_points.extend(self._projected_points[point_index])
+            polygon = self._canvas.create_polygon(
+                draw_points,
+                outline=self._line_colour,
+                fill=""
+            )
+            self._polygon_ids.append(polygon)
+            
+    def _update_faces(self):
+        for polygon_id, face in zip(self._polygon_ids, self._faces):
+            draw_points = []
+            for point_index in face:
+                draw_points.extend(self._projected_points[point_index])
+            self._canvas.coords(
+                polygon_id,
+                *draw_points
+            )
 
     def move(self, direction, amount):
         directions = {
