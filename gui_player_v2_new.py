@@ -1411,7 +1411,7 @@ class AudioPlayerGUI:
                 )
 
             self.refresh_playback_status()
-            self.update_info()
+          
 
         self.root.after(250, self.update_gui_loop)
 
