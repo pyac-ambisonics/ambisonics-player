@@ -37,6 +37,9 @@ class AudioPlayerGUI:
 
         self._backend_load_queue = Queue()
 
+        # Decoder cache: (hrtf_path, hp_filter, order) -> (HRTF, SphericalHarmonics)
+        self._decoder_cache = {}
+
         self.root = tk.Tk()
         self.root.title("Ambisonics Player")
         self.root.geometry("1100x820")
@@ -194,7 +197,28 @@ class AudioPlayerGUI:
     def on_scroll_canvas_configure(self, event):
         self.scroll_canvas.itemconfigure(self.scroll_window, width=event.width)
 
+    def _is_inside_scroll_frame(self, event):
+        """Return True if the mouse cursor is actually over the scrollable area."""
+        try:
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return False
+        while widget is not None:
+            if widget is self.scroll_frame:
+                return True
+            widget = widget.master
+        return False
+
     def on_mousewheel(self, event):
+        # Only scroll the canvas when the mouse is over the scrollable page area.
+        # Combobox dropdowns, dialog popups etc. are NOT children of scroll_frame.
+        if not self._is_inside_scroll_frame(event):
+            return
+
+        # Close any open dropdowns so they don't get left behind when the page moves.
+        self.root.event_generate("<Escape>")
+
+        # Skip events that land on the info text widget (it handles its own scroll).
         if event.widget is getattr(self, "info_text", None):
             return
 
@@ -376,8 +400,9 @@ class AudioPlayerGUI:
         self.hrtf_button = ttk.Button(card, text="Browse", command=self.select_hrtf_file)
         self.hrtf_button.grid(row=5, column=4, sticky="w", pady=(16, 0))
 
-        self.edit_settings_button = ttk.Button(card, text="Edit Settings", command=self.unlock_decoder_settings)
-        self.edit_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button = ttk.Button(card, text="Apply Settings", command=self.apply_decoder_settings)
+        self.apply_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button.configure(state=tk.DISABLED)
 
         ttk.Label(card, textvariable=self.loaded_settings_text, style="SmallInfo.TLabel").grid(
             row=6, column=0, columnspan=6, sticky="w", pady=(12, 0)
@@ -593,8 +618,6 @@ class AudioPlayerGUI:
         ]:
             widget.configure(state=state)
 
-        self.edit_settings_button.configure(state=tk.NORMAL if self.has_loaded_player() else tk.DISABLED)
-
     def set_decoder_settings_enabled(self, enabled: bool):
         self.order_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.block_size_box.configure(state="readonly" if enabled else tk.DISABLED)
@@ -611,9 +634,26 @@ class AudioPlayerGUI:
 
         return str(candidate.resolve())
 
-    def unlock_decoder_settings(self):
-        self.set_decoder_settings_enabled(True)
-        self.decoder_note.set("Settings unlocked. Click Load AmbiX File again to apply changes.")
+    def _update_apply_button(self):
+        """Enable Apply Settings only when playback is fully stopped."""
+        if not self.has_loaded_player() or self.is_loading:
+            self.apply_settings_button.configure(state=tk.DISABLED)
+            return
+        player = self.player
+        is_stopped = (
+            not player.play_event.is_set()
+            and not player.pause_event.is_set()
+        )
+        self.apply_settings_button.configure(
+            state=tk.NORMAL if is_stopped else tk.DISABLED
+        )
+
+    def apply_decoder_settings(self):
+        """Apply current decoder settings."""
+        if not self.has_loaded_player():
+            return
+        self.decoder_note.set("Applying decoder settings...")
+        self.update_decoder_settings()
 
     def set_loading(self, loading: bool, message=""):
         self.is_loading = loading
@@ -625,13 +665,14 @@ class AudioPlayerGUI:
             self.pipeline_status.set(f"Pipeline: {message or 'loading'}")
             self.ambix_button.configure(state=tk.DISABLED)
             self.set_decoder_settings_enabled(False)
-            self.edit_settings_button.configure(state=tk.DISABLED)
+            self.apply_settings_button.configure(state=tk.DISABLED)
             self.set_controls_enabled(False)
         else:
             self.loading_text.set("")
             self.ambix_button.configure(state=tk.NORMAL)
             self.set_decoder_settings_enabled(self.has_loaded_player())
             self.set_controls_enabled(self.has_loaded_player())
+            self._update_apply_button()
 
         self.root.update_idletasks()
 
@@ -665,13 +706,7 @@ class AudioPlayerGUI:
         hp_dir = self.app_dir / "resources" / "Headphones"
         if not hp_dir.exists():
             return ["None"]
-
-        # check if the selected hrtf is defualt FABIAN
-        if self.hrtf_path_value.get() == "Default FABIAN HRTF" or "FABIAN_HRIR_measured_" in self.hrtf_path_value.get():
-            return ["None"] + ["Diffuse Field Equalization"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
-        
-        # if not, we only give None and DFE as options
-        return ["None"] + ["Diffuse Field Equalization"]
+        return ["None"] + ["Diffuse Field Equalization"] + sorted(path.name for path in hp_dir.iterdir() if path.is_dir())
 
     def select_hrtf_file(self):
         file_path = filedialog.askopenfilename(
@@ -680,9 +715,6 @@ class AudioPlayerGUI:
         )
         if file_path:
             self.hrtf_path_value.set(file_path)
-            # update headphone filter options
-            self.headphone_box.configure(values=self.get_headphone_names())
-
 
     def show_wav_disabled_message(self):
         messagebox.showinfo(
@@ -780,15 +812,23 @@ class AudioPlayerGUI:
                         "Selected file is not valid for the selected Ambisonics order."
                     )
 
-                hrtf = HRTF(hrtf_file)
-                if headphone != "None":
-                    hrtf.load_hp_filter(headphone)
-
-                sh = SphericalHarmonics(
-                    hrtf=hrtf,
-                    sampling_rate=ambix.get_samplerate(),
-                    ambi_order=ambix.get_order(),
-                )
+                normalized_hp = None if headphone in (None, "", "None") else headphone
+                normalized_hrtf = self._normalize_hrtf_path(hrtf_path)
+                cache_key = (normalized_hrtf, normalized_hp, ambix.get_order())
+                if cache_key in self._decoder_cache:
+                    hrtf, sh = self._decoder_cache[cache_key]
+                    print("Decoder settings unchanged — reusing cached HRTF and SH coefficients.")
+                else:
+                    hrtf = HRTF(hrtf_file)
+                    if headphone != "None":
+                        hrtf.load_hp_filter(headphone)
+                    sh = SphericalHarmonics(
+                        hrtf=hrtf,
+                        sampling_rate=ambix.get_samplerate(),
+                        ambi_order=ambix.get_order(),
+                    )
+                    self._decoder_cache[cache_key] = (hrtf, sh)
+                    print("Decoder settings changed — building HRTF and SH coefficients.")
 
                 player = AudioPlayer(ambi_file=ambix, sh=sh, gain=requested_gain)
                 player.source_name = path
@@ -853,11 +893,11 @@ class AudioPlayerGUI:
 
                 change = False
                 needs_rebuild = False
+                order_warning = None
 
                 if new_hrtf is not None and new_hrtf != current_hrtf:
                     print("Updating HRTF")
                     # hrtf file changed
-                    self.player.sh.hrtf.path = Path(new_hrtf)
                     player.sh.hrtf = HRTF(new_hrtf)
                     change = True
                     needs_rebuild = True
@@ -880,22 +920,51 @@ class AudioPlayerGUI:
                 if new_order is not None and new_order != current_order:
                     print("Updating Order")
                     # order changed
-                    # set order in ambi file
+                    # set order in ambi file (may be silently clamped)
                     self.player.ambi_file.set_order(new_order)
+                    actual_order = self.player.ambi_file.get_order()
+                    if actual_order < new_order:
+                        order_warning = (
+                            f"Requested order {new_order} exceeds what this file supports "
+                            f"(max order {actual_order}). Using order {actual_order} instead."
+                        )
+                    else:
+                        order_warning = None
                     change = True
                     needs_rebuild = True
 
                 if needs_rebuild:
-                    # rebuild our spherical harmonics
-                    new_sh = SphericalHarmonics(
-                        hrtf=player.sh.hrtf,
-                        sampling_rate=player.ambi_file.get_samplerate(),
-                        ambi_order=player.ambi_file.get_order(),
-                    )
+                    # check cache before rebuilding
+                    rebuild_order = player.ambi_file.get_order()
+                    rebuild_hrtf = new_hrtf if new_hrtf is not None else current_hrtf
+                    rebuild_hp = new_hp if new_hp is not None else current_hp
+                    rebuild_key = (rebuild_hrtf, rebuild_hp, rebuild_order)
+                    if rebuild_key in self._decoder_cache:
+                        _, new_sh = self._decoder_cache[rebuild_key]
+                        print(f"Reusing cached SH for order {rebuild_order}.")
+                    else:
+                        new_sh = SphericalHarmonics(
+                            hrtf=player.sh.hrtf,
+                            sampling_rate=player.ambi_file.get_samplerate(),
+                            ambi_order=rebuild_order,
+                        )
+                        self._decoder_cache[rebuild_key] = (player.sh.hrtf, new_sh)
+                        print(f"Built and cached order {rebuild_order}.")
                     # cleanup old SH instance
                     player.sh.close()
                     player.sh = new_sh
-                    
+                    # Stop audio stream so Play works after decoder rebuild
+                    player.play_event.clear()
+                    if player.stream is not None:
+                        player.stream.stop()
+                        player.stream.close()
+                        player.stream = None
+                    # Update decoder cache with rebuilt HRTF+SH
+                    cached_hrtf_path = new_hrtf if new_hrtf is not None else current_hrtf
+                    cached_hp = new_hp if new_hp is not None else current_hp
+                    cache_key = (cached_hrtf_path, cached_hp, player.ambi_file.get_order())
+                    self._decoder_cache[cache_key] = (player.sh.hrtf, new_sh)
+
                 if change:
                     player._reset_process_variables()
 
@@ -906,12 +975,13 @@ class AudioPlayerGUI:
                     "duration": player.ambi_file.get_duration(),
                     "headphone": new_hp if new_hp is not None else current_hp,
                     "hrtf": new_hrtf if new_hrtf is not None else current_hrtf,
+                    "order_warning": order_warning,
                 }
                 self._backend_load_queue.put(("decoder_update", result))
 
             except Exception as error:
                 traceback.print_exc()
-                self._backend_load_queue.put(("error", str(error)))
+                self._backend_load_queue.put(("decoder_update_error", str(error)))
             finally:
                 self.update_event.set()
 
@@ -938,6 +1008,7 @@ class AudioPlayerGUI:
 
                     self.player = result["player"]
 
+
                     file_name = os.path.basename(result["path"])
                     self.selected_file.set(f"AmbiX: {file_name}")
                     self.input_type.set(
@@ -948,7 +1019,7 @@ class AudioPlayerGUI:
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
                     self.playback_status.set("Status: Loaded")
                     self.playback_status_label.configure(foreground="black")
-                    self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
+                    self.decoder_note.set("Settings are editable. Click Apply Settings to rebuild decoder.")
 
                     self.reset_progress_display()
                     # self.update_rotation_label()
@@ -961,6 +1032,9 @@ class AudioPlayerGUI:
                     result = payload
                     self.update_event.clear()
 
+                    # Sync combobox with the actual order (may be clamped by set_order)
+                    self.order_value.set(str(result["order"]))
+
                     self.input_type.set(
                         f"Input type: AmbiX / order {result['order']} / "
                         f"{result['channels']} channels"
@@ -969,16 +1043,28 @@ class AudioPlayerGUI:
                     self.pipeline_status.set("Pipeline: AmbiX -> SH-HRTF decoder -> AudioPlayer")
                     self.playback_status.set("Status: Loaded")
                     self.playback_status_label.configure(foreground="black")
-                    self.decoder_note.set("Loaded decoder settings are locked. Use Edit Settings to change them for the next load.")
+                    self.decoder_note.set("Settings are editable. Click Apply Settings to rebuild decoder.")
 
                     self.reset_progress_display()
                     # self.update_rotation_label()
                     self.update_loaded_settings(result)
                     # self.update_rotation_backend_status()
                     self.set_loading(False)
-                    # make sure decoder settings are disabled if we only updated the decoder, because this only gets called on a play
-                    self.set_decoder_settings_enabled(False)
+                    if result.get("order_warning"):
+                        messagebox.showwarning("Order Clamped", result["order_warning"])
                     self.update_info()
+
+                elif message_type == "decoder_update_error":
+                    # Decoder update failed, but the player is still loaded.
+                    # Restore UI without stopping the player.
+                    self.set_loading(False)
+                    self.pipeline_status.set("Pipeline: decoder update failed")
+                    self.playback_status.set("Status: Decoder update failed")
+                    self.playback_status_label.configure(foreground="red")
+                    self.update_info()
+                    print(f"[Decoder Update Error] {payload}")
+                    traceback.print_exc()
+                    messagebox.showerror("Decoder Update Error", payload)
 
                 else:
                     self.set_loading(False)
@@ -1012,7 +1098,7 @@ class AudioPlayerGUI:
 
         try:
             self.player.play()
-            self.set_decoder_settings_enabled(False)
+            self._update_apply_button()
             self.playback_status.set("Status: Playing")
             self.playback_status_label.configure(foreground="black")
             self.update_info()
@@ -1025,6 +1111,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.pause()
+            self._update_apply_button()
             self.playback_status.set("Status: Paused")
             self.update_info()
         except Exception as error:
@@ -1035,7 +1122,7 @@ class AudioPlayerGUI:
             return
         try:
             self.player.stop()
-            self.set_decoder_settings_enabled(True)
+            self._update_apply_button()
             self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
             self.time_text.set(
@@ -1362,7 +1449,15 @@ class AudioPlayerGUI:
             except Exception:
                 print("Player didn't close cleanly!")
                 pass
+        self.emtpy_and_close_cache()
         self.root.destroy()
+
+    def emtpy_and_close_cache(self):
+        """
+        Empties and closes all cached SH objects
+        """
+        for hrtf, sh in self._decoder_cache.values():
+            sh.close()
 
     def run(self):
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)

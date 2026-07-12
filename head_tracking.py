@@ -45,7 +45,7 @@ class DemoHeadTracker:
     and the rotation hook.
     """
 
-    def __init__(self, orientation_state, yaw_amplitude=90.0, pitch_amplitude=45.0, period=18.0):
+    def __init__(self, orientation_state, yaw_amplitude=60.0, pitch_amplitude=0.0, period=6.0):
         self.orientation_state = orientation_state
         self.yaw_amplitude = float(yaw_amplitude)
         self.pitch_amplitude = float(pitch_amplitude)
@@ -76,11 +76,9 @@ class DemoHeadTracker:
     def _tracking_loop(self):
         while self._running:
             elapsed = time.perf_counter() - self._start_time
-            phase = (2 * math.pi * elapsed / self.period)
-            # go between "left and right"  with a bit of a slow pahse around 0° (added first harmonic)
-            yaw = 0.76 * self.yaw_amplitude * (math.sin(phase) - 0.5 * math.sin(2 * phase)) + 90
-            # go between "up" and "front"
-            pitch = self.pitch_amplitude * math.sin(phase * 0.5) + 45
+            phase = (2 * math.pi * elapsed / self.period) * 0.3
+            yaw = self.yaw_amplitude * math.sin(phase)
+            pitch = self.pitch_amplitude * math.sin(phase * 0.5)
             self.orientation_state.set(
                 yaw,
                 pitch,
@@ -94,7 +92,7 @@ class DemoHeadTracker:
             return self.orientation_state.get()
 
         elapsed = time.perf_counter() - self._start_time
-        phase = (2.0 * math.pi * elapsed / self.period)
+        phase = (2.0 * math.pi * elapsed / self.period) * 0.3
         yaw = self.yaw_amplitude * math.sin(phase)
         pitch = self.pitch_amplitude * math.sin(phase * 0.5)
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
@@ -221,7 +219,7 @@ if False:
             self._client = None
             self.connected = False
 
-        # start 
+        # start
         def start(self):
             dispatcher = Dispatcher()
             dispatcher.map(
