@@ -805,6 +805,8 @@ class AudioPlayerGUI:
                 cache_key = (normalized_hrtf, normalized_hp, ambix.get_order())
                 if cache_key in self._decoder_cache:
                     hrtf, sh = self._decoder_cache[cache_key]
+                    # restart the rotation on loading a cached SH
+                    sh.restart_rotation()
                     print("Decoder settings unchanged — reusing cached HRTF and SH coefficients.")
                 else:
                     hrtf = HRTF(hrtf_file)
@@ -927,6 +929,7 @@ class AudioPlayerGUI:
                     rebuild_hrtf = new_hrtf if new_hrtf is not None else current_hrtf
                     rebuild_hp = new_hp if new_hp is not None else current_hp
                     rebuild_key = (rebuild_hrtf, rebuild_hp, rebuild_order)
+
                     if rebuild_key in self._decoder_cache:
                         _, new_sh = self._decoder_cache[rebuild_key]
                         print(f"Reusing cached SH for order {rebuild_order}.")
@@ -938,15 +941,21 @@ class AudioPlayerGUI:
                         )
                         self._decoder_cache[rebuild_key] = (player.sh.hrtf, new_sh)
                         print(f"Built and cached order {rebuild_order}.")
+
                     # cleanup old SH instance
                     player.sh.close()
+                    # restart the rotation on loading a cached SH
+                    new_sh.restart_rotation()
                     player.sh = new_sh
+
                     # Stop audio stream so Play works after decoder rebuild
-                    player.play_event.clear()
-                    if player.stream is not None:
-                        player.stream.stop()
-                        player.stream.close()
-                        player.stream = None
+                    player.stop()
+                    # player.play_event.clear()
+                    # if player.stream is not None:
+                    #     player.stream.stop()
+                    #     player.stream.close()
+                    #     player.stream = None
+
                     # Update decoder cache with rebuilt HRTF+SH
                     cached_hrtf_path = new_hrtf if new_hrtf is not None else current_hrtf
                     cached_hp = new_hp if new_hp is not None else current_hp
@@ -992,10 +1001,10 @@ class AudioPlayerGUI:
                     # if already a player was loaded, discard the old one before loading the new one
                     if self.has_loaded_player():
                         print(f"Closing the old player before assigning the new one.")
-                        self.player.close()
+                        # only stop, otherwise our rotation thread gets killed!
+                        self.player.stop()
 
                     self.player = result["player"]
-
 
                     file_name = os.path.basename(result["path"])
                     self.selected_file.set(f"AmbiX: {file_name}")

@@ -187,6 +187,32 @@ class SphericalHarmonics:
         *_, n_samples = self.hrir_nm.shape
         return n_samples
     
+    def restart_rotation(self):
+        """
+        Closes the possibly still running rotation thread, then creates a new rotation thread and starts it.
+        """
+        # close old rotation thread if it exists and is alive
+        if self._rotation_thread is not None:
+            if self._rotation_thread.is_alive():
+                # set the stop flag, set rotation update and hope old thread will close
+                self._stop_rotation_thread.set()
+                self._rotation_update.set()
+                self._rotation_thread.join(1.)
+                if self._rotation_thread.is_alive():
+                    raise Exception("Couldn't close rotation thread.")
+                
+            self._rotation_thread = None
+
+        # clear the stop and rotation flag
+        self._stop_rotation_thread.clear()
+        self._rotation_update.clear()
+        # start a new rotation thread
+        self._rotation_thread = threading.Thread(
+            target=self._rotation_worker,
+            daemon=True,
+        )
+        self._rotation_thread.start()
+
     def update_rotation_matrix(self, angles, convention='zyx'):
         """
         Directly Compute and update the internal Wigner-D matrix based on thie given Euler angles in degrees (zyx). This will block the thread!
@@ -444,8 +470,8 @@ class SphericalHarmonics:
 
         for ear in range(2):
             # perform convolution in rotated frequency domain and sum in frequency domain
-            #with self._rotation_lock:
-            fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
+            with self._rotation_lock:
+                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
         
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
