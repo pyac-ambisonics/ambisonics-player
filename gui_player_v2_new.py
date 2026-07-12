@@ -641,6 +641,7 @@ class AudioPlayerGUI:
         if not self.has_loaded_player():
             return
         self.stop_head_tracking(reset_orientation=False)
+        self.player.stop(reset_position=False)
         self.decoder_note.set("Applying decoder settings...")
         self.update_decoder_settings()
 
@@ -1392,10 +1393,7 @@ class AudioPlayerGUI:
 
     def write_info_text(self, text):
         self.info_text.configure(state="normal")
-        scroll_top = self.info_text.yview()[0]
-        self.info_text.delete("1.0", tk.END)
-        self.info_text.insert(tk.END, text)
-        self.info_text.yview_moveto(scroll_top)
+        self.info_text.replace("1.0", tk.END, text)
         self.info_text.configure(state="disabled")
 
     def update_info(self):
