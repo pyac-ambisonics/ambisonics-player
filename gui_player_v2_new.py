@@ -306,6 +306,27 @@ class AudioPlayerGUI:
         self.progress_slider.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 4))
         self.progress_slider.bind("<ButtonPress-1>", self.on_progress_press)
         self.progress_slider.bind("<ButtonRelease-1>", self.on_progress_release)
+        
+        ttk.Label(card, text="Volume", background="white", font=("Arial", 10, "bold")).grid(
+            row=3, column=0, sticky="w", pady=(16, 0)
+        )
+        self.volume_slider = ttk.Scale(
+            card,
+            from_=0.0,
+            to=1.0,
+            orient=tk.HORIZONTAL,
+            variable=self.volume_value,
+            command=self.set_volume,
+        )
+        self.volume_slider.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.volume_display = ttk.Label(
+            card,
+            textvariable=self.volume_display_value,
+            background="white",
+            width=6,
+            font=("Consolas", 10),
+        )
+        self.volume_display.grid(row=3, column=4, sticky="w", pady=(16, 0))
 
         card.columnconfigure(4, weight=1)
 
@@ -343,27 +364,6 @@ class AudioPlayerGUI:
             width=10,
         )
         self.block_size_box.grid(row=1, column=3, sticky="w", padx=(14, 18), pady=(16, 0))
-
-        ttk.Label(card, text="Volume", background="white", font=("Arial", 10, "bold")).grid(
-            row=2, column=0, sticky="w", pady=(16, 0)
-        )
-        self.volume_slider = ttk.Scale(
-            card,
-            from_=0.0,
-            to=1.0,
-            orient=tk.HORIZONTAL,
-            variable=self.volume_value,
-            command=self.set_volume,
-        )
-        self.volume_slider.grid(row=2, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
-        self.volume_display = ttk.Label(
-            card,
-            textvariable=self.volume_display_value,
-            background="white",
-            width=6,
-            font=("Consolas", 10),
-        )
-        self.volume_display.grid(row=2, column=4, sticky="w", pady=(16, 0))
 
         ttk.Label(
             card,
@@ -451,9 +451,10 @@ class AudioPlayerGUI:
         )
         self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(16, 0))
 
-        ttk.Label(card, text="Head tracker cable on ", background="white", font=("Arial", 10)).grid(
+        ttk.Label(card, text="Head tracker cable on:\n(Restart tracking to apply changes)", background="white", font=("Arial", 10)).grid(
             row=5, column=2, sticky="w", pady=(16, 0)
         )
+
         self.chirality_box = ttk.Combobox(
             card,
             textvariable=self.chirality,
