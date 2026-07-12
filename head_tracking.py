@@ -1,3 +1,12 @@
+"""Head-orientation helpers for the ambisonics player.
+
+This module exposes a small set of reusable components for reading, storing,
+and generating head orientation data. It supports two modes:
+
+* a deterministic demo tracker for testing and presentations, and
+* a hardware tracker adapter built around the `pythonheadtracker` package.
+"""
+
 import math
 import threading
 import time
@@ -8,6 +17,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Orientation:
+    """Snapshot of a head pose in degrees.
+
+    Attributes:
+        yaw: Rotation around the vertical axis.
+        pitch: Rotation around the side-to-side axis.
+        roll: Rotation around the forward axis.
+        source: Origin of the measurement, can be `off`, `demo` or `hardware`.
+    """
+
     yaw: float = 0.0
     pitch: float = 0.0
     roll: float = 0.0
@@ -22,12 +40,16 @@ class OrientationState:
         self._orientation = Orientation()
 
     def set(self, yaw=0.0, pitch=0.0, roll=0.0, source="manual"):
+        """Store a new orientation and return it as an Orientation() instance."""
+
         orientation = Orientation(float(yaw), float(pitch), float(roll), source)
         with self._lock:
             self._orientation = orientation
         return orientation
 
     def get(self):
+        """Return the most recent orientation snapshot."""
+
         with self._lock:
             return self._orientation
         
@@ -55,6 +77,11 @@ class DemoHeadTracker:
         self._start_time = None
 
     def start(self):
+        """Start the demo tracker loop.
+
+        The tracker moves smoothly in yaw and can optionally add pitch motion.
+        """
+
         if self._running:
             return
         self._running = True
@@ -66,14 +93,20 @@ class DemoHeadTracker:
         self._thread.start()
 
     def stop(self):
+        """Stop the demo tracker and the associated thread."""
+
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1)
 
     def is_running(self):
+        """Return whether the demo tracker is currently running."""
+
         return self._running
 
     def _tracking_loop(self):
+        """Continuously update the orientation state with a smooth sinusoid."""
+
         while self._running:
             elapsed = time.perf_counter() - self._start_time
             phase = (2 * math.pi * elapsed / self.period) * 0.3
@@ -88,6 +121,8 @@ class DemoHeadTracker:
             time.sleep(0.04)
 
     def sample(self):
+        """Return the current demo orientation without waiting for the loop."""
+
         if not self._running:
             return self.orientation_state.get()
 
@@ -98,9 +133,10 @@ class DemoHeadTracker:
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
 
 class HeadTracker:
-    """
-    Provides headtracker support for Supperware Headtracker 1 and a few other head-tracking solutions via the package pythonheadtracker.
-    More info on supported devices at https://pyheadtracker.readthedocs.io/en/latest/index.html 
+    """Adapter for physical head-tracking hardware using `pythonheadtracker`.
+
+    The class opens a MIDI-based Supperware Headtracker 1 device, continually
+    reads orientation data, and writes it into an `OrientationState` instance.
     """
 
     def __init__(self, orientation_state):
@@ -110,11 +146,12 @@ class HeadTracker:
         self.ht = None
 
     def is_available(self):
+        """Return True when matching MIDI input/output tracker devices are present."""
+
         return (any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) 
             and any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_output_names())
         )
 
-    # this function is designed to work specifically with the Supperware Headtracker 1 and should be changed for use with a different hardware
     def start(
         self,
         in_device_name=None,
@@ -122,10 +159,10 @@ class HeadTracker:
         refresh_rate=25,
         chirality="preserve"
     ):
-        """
-        Start hardware head tracking.
+        """Start hardware head tracking.
 
-        The device names can be passed in from the GUI. If not, they will automatically be set by searching among the available MIDI devices.
+        If device names are omitted, they are resolved automatically from the
+        available MIDI input/output devices.
         """
 
         if self._running:
@@ -157,6 +194,8 @@ class HeadTracker:
         self._thread.start()
 
     def _tracking_loop(self):
+        """Read device orientation in a background thread and publish it."""
+
         while self._running:
             try:
                 orientation = pht.utils.rad2deg(self.ht.read_orientation())
@@ -177,6 +216,8 @@ class HeadTracker:
         self._running = False
 
     def stop(self):
+        """Stop the hardware tracker and close the device connection."""
+
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1)
@@ -189,10 +230,14 @@ class HeadTracker:
                 self.ht = None
 
     def zero(self):
+        """Re-zero the device coordinate frame if the tracker supports it."""
+
         if self.ht is not None:
             self.ht.zero()
 
     def is_running(self):
+        """Return whether the hardware tracking thread is active."""
+
         return self._running
 
 if False:

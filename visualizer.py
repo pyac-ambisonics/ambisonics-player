@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
+"""Tkinter-based object visualiser for the ambisonics player GUI.
+
+The module provides a lightweight helper class for drawing a 3D mesh
+from a Wavefront `.obj` file into a Tk canvas. It is used to visualise the
+current head orientation in the GUI.
+This code is derived from the GitHub repository https://github.com/ES-Alexander/3D-Rendering-Desktop-App.git
+and was adapted to work specifically with the ambisonics player
+"""
 
 import numpy as np
 from collections import namedtuple
 from tkinter import filedialog, messagebox
 
 Angle = namedtuple('Angle', 'x y z')
-YPR = namedtuple('YPR', 'y p r')
+"""Named tuple holding roll, pitch, and yaw cosine/sine components."""
 
 class Obj:
-    ''' A drawable .obj file representation. '''
+    '''A drawable `.obj` mesh representation for Tk canvas rendering.'''
     # .obj format specifications
     VERTEX, FACE = 'v', 'f'
     RELEVANTS = [relevant + ' ' for relevant in (VERTEX, FACE)]
@@ -22,7 +30,7 @@ class Obj:
                            line_colour, point_size, point_colour)
 
     def _read_points(self, filename):
-        ''' Parse a .obj file to extract the relevant data. '''
+        ''' Parse a `.obj` file to extract the relevant data. '''
         # initialise variables
         self.long_filename = self.filename = filename
         if '/' in filename:
@@ -137,7 +145,7 @@ class Obj:
                                      fill=self._point_colour)
 
     def _draw_faces(self):
-        ''' Draw the lines for each stored face. '''
+        ''' Draw the lines for each stored face. Superseded by _create_faces() and _update_faces()'''
         for face in self._faces:
             draw_points = []
             for point_index in face:
@@ -146,19 +154,18 @@ class Obj:
                                         fill='')
     
     def _create_faces(self):
+        """Draw the complete object from scratch. Only runs once upon creating the instance"""
         self._polygon_ids = []
         for face in self._faces:
             draw_points = []
             for point_index in face:
                 draw_points.extend(self._projected_points[point_index])
             polygon = self._canvas.create_polygon(
-                draw_points,
-                outline=self._line_colour,
-                fill=""
-            )
+                draw_points, outline=self._line_colour, fill="")
             self._polygon_ids.append(polygon)
             
     def _update_faces(self):
+        """Update polygon coordinates to refresh the canvas"""
         for polygon_id, face in zip(self._polygon_ids, self._faces):
             draw_points = []
             for point_index in face:
@@ -169,6 +176,7 @@ class Obj:
             )
 
     def move(self, direction, amount):
+        """Two-dimentional translation of the object"""
         directions = {
             '<Up>'   : (1, -1),
             '<Down>' : (1, 1),
@@ -180,6 +188,7 @@ class Obj:
         self._changed = True
 
     def reset_rotation(self):
+        """Reset rotation to (0, 0, 0)"""
         self._rotation = np.array([0]*3)
 
     @classmethod
