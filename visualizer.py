@@ -79,7 +79,7 @@ class Obj:
                 self._rotation *= 2
             self._changed = True
         elif rotation is not None and np.any([rotation != self._rotation]):
-            self._rotation = -np.array([rotation[1], rotation[0], rotation[2]]) * np.pi / 180
+            self._rotation = np.radians(rotation)
             self._changed = True
         if not self._changed:
             return # nothing changed, so no need to re-draw
@@ -90,6 +90,12 @@ class Obj:
         # only calculate this once, since it's the same for all points
         #self._rotation[1] -= np.pi/2
         rotation = self._rotation_matrix()
+        C = np.array([
+            [0, -1, 0],
+            [0,  0, 1],
+            [1,  0, 0]
+        ])
+        rotation = C @ rotation @ C.T
         # vectorised matrix arithmetic - do all points at once
         rotated = rotation @ self._vertices
         point_scales = self._scale / (self._zoom - rotated[2])
@@ -120,26 +126,24 @@ class Obj:
                             [0    , 0     , 1]])
             return rot_z @ rot_x @ rot_y
         
-        cos = YPR(*np.cos(self._rotation))
-        sin = YPR(*np.sin(self._rotation))
+        yaw, pitch, roll = self._rotation
+        yaw = -yaw
 
-        rot_x = np.array([[cos.y, sin.y, 0],
-                        [-sin.y, cos.y, 0],
-                        [0, 0, 1]])
+        cos = Angle(np.cos(roll), np.cos(pitch), np.cos(yaw))
+        sin = Angle(np.sin(roll), np.sin(pitch), np.sin(yaw))
 
-        rot_y = np.array([[cos.p, 0, -sin.p],
-                        [0    , 1, 0     ],
-                        [sin.p, 0, cos.p ]])
+        rot_x = np.array([[1, 0    , 0     ],
+                            [0, cos.x, -sin.x],
+                            [0, sin.x, cos.x ]])
 
-        rot_z = np.array([[1, 0, 0],
-                        [0, cos.r , sin.r],
-                        [0, -sin.r, cos.r]])
-        #return rot_x @ rot_y @ rot_z
-        return np.array([
-            [cos.y*cos.p, sin.y*cos.p, -sin.p],
-            [cos.y*sin.p*sin.r-sin.y*cos.r, sin.y*sin.p*sin.r+cos.y*cos.r, cos.p*sin.r],
-            [cos.y*sin.p*cos.r+sin.y*sin.r, sin.y*sin.p*cos.r-sin.y*sin.r, cos.p*cos.r]]
-        )
+        rot_y = np.array([[cos.y, 0, -sin.y],
+                            [0    , 1, 0     ],
+                            [sin.y, 0, cos.y ]])
+
+        rot_z = np.array([[cos.z, -sin.z, 0],
+                            [sin.z, cos.z , 0],
+                            [0    , 0     , 1]])
+        return rot_z @ rot_y @ rot_x
 
     def _draw_projected_points(self):
         ''' Draw the current projected points. '''
