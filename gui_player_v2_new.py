@@ -1253,7 +1253,7 @@ class AudioPlayerGUI:
             self.draw_head_tracking_visualizer(orientation)
             self.apply_orientation_to_audio(orientation)
 
-        self.root.after(50, self.update_head_tracking_loop)
+        self.root.after(10, self.update_head_tracking_loop)
 
     def draw_head_tracking_visualizer(self, orientation):
         ypr = [orientation.yaw, orientation.pitch, orientation.roll]

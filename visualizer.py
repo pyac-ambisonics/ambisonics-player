@@ -64,11 +64,12 @@ class Obj:
         self._point_colour = point_colour
 
         self._changed = True
-        self.draw()
+        self.draw(rotation=self._rotation)
 
     def draw(self, zoom=None, rotation=None, spin=False):
         ''' Draw self, zoomed and rotated. '''
         # update only if changed since last time
+        delta = np.max(np.abs(np.array(rotation) - self._rotation))
         if zoom is not None and zoom != self._zoom:
             self._zoom = zoom
             self._changed = True
@@ -78,7 +79,7 @@ class Obj:
             else:
                 self._rotation *= 2
             self._changed = True
-        elif rotation is not None and np.any([rotation != self._rotation]):
+        elif rotation is not None and delta>0.2: #np.any([rotation != self._rotation]):
             self._rotation = np.radians(rotation)
             self._changed = True
         if not self._changed:
@@ -108,25 +109,8 @@ class Obj:
 
     def _rotation_matrix(self):
         ''' Returns the current net rotation matrix for self. '''
-        
-        if False:
-            cos = Angle(*np.cos(self._rotation))
-            sin = Angle(*np.sin(self._rotation))
-
-            rot_x = np.array([[1, 0    , 0     ],
-                            [0, cos.x, -sin.x],
-                            [0, sin.x, cos.x ]])
-
-            rot_y = np.array([[cos.y, 0, -sin.y],
-                            [0    , 1, 0     ],
-                            [sin.y, 0, cos.y ]])
-
-            rot_z = np.array([[cos.z, -sin.z, 0],
-                            [sin.z, cos.z , 0],
-                            [0    , 0     , 1]])
-            return rot_z @ rot_x @ rot_y
-        
         yaw, pitch, roll = self._rotation
+        # match sign convention of the visualiser
         yaw = -yaw
 
         cos = Angle(np.cos(roll), np.cos(pitch), np.cos(yaw))
