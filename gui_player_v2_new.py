@@ -1392,8 +1392,10 @@ class AudioPlayerGUI:
 
     def write_info_text(self, text):
         self.info_text.configure(state="normal")
+        scroll_top = self.info_text.yview()[0]
         self.info_text.delete("1.0", tk.END)
         self.info_text.insert(tk.END, text)
+        self.info_text.yview_moveto(scroll_top)
         self.info_text.configure(state="disabled")
 
     def update_info(self):
