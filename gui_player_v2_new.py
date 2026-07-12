@@ -640,6 +640,7 @@ class AudioPlayerGUI:
         """Apply current decoder settings."""
         if not self.has_loaded_player():
             return
+        self.stop_head_tracking(reset_orientation=False)
         self.decoder_note.set("Applying decoder settings...")
         self.update_decoder_settings()
 
