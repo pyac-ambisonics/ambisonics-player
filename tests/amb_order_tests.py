@@ -1,8 +1,12 @@
 
 import sys
-sys.path.append('../')
+from pathlib import Path
 
-from src.playamb import HRTF, SphericalHarmonics, AmbisonicsFile
+# Add the 'src' directory to sys.path
+src_path = Path.cwd().parent / 'src'
+sys.path.append(str(src_path))
+
+from playamb import HRTF, SphericalHarmonics, AmbisonicsFile
 
 import time
 import soundfile as sf
@@ -60,7 +64,7 @@ def write_test_files(filepath, orders=[1, 3, 5, 7], hp_filters=["None", "Diffuse
                 print(f"Finished writing {file}! Time: {time.time() - start}\n")
 
 def main():
-    file = "D:/Bibliotheken/Dokumente/_Uni/02_Semester 2/Python & Akustik/Ambisonics Player/Bechet_AmbiX_7th.wav"
+    file = "D:/Bibliotheken/Documents/_Uni/02_Semester 2/Python & Akustik/Ambisonics Player/Bechet_AmbiX_7th.wav"
     filter = ["None", "Diffuse Field Equalization", "Audio-technica ATH M50x"]
     names = ["None", "DFE", "ATH-M50x"]
     orders = [0, 1, 5, 7]

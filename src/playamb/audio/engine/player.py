@@ -4,7 +4,7 @@ import queue
 import threading
 import soundfile as sf
 
-from src.playamb.audio.data.ambifile import AmbisonicsFile
+from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.utils.utils import next_power_of_two
 

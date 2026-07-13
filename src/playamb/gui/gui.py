@@ -8,13 +8,13 @@ from queue import Queue
 from tkinter import filedialog, messagebox
 from tkinter import ttk
 
-from src.playamb.audio.data.ambifile import AmbisonicsFile
-from src.playamb.audio.engine.player import AudioPlayer
-from src.playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
+from playamb.audio.data.ambifile import AmbisonicsFile
+from playamb.audio.engine.player import AudioPlayer
+from playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
 from playamb.audio.engine.hrtf import HRTF
 from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.gui.visualizer import Obj
-
+from playamb.utils.utils import DEFAULT_HRTF_FILE
 
 class AudioPlayerGUI:
     """
@@ -27,10 +27,8 @@ class AudioPlayerGUI:
     GUI because the current AudioPlayer backend is an AmbiX streaming player.
     """
 
-    DEFAULT_HRTF_FILE = "FABIAN_HRIR_measured_HATO_0.sofa"
-
     def __init__(self):
-        self.app_dir = Path(__file__).resolve().parent
+        self.app_dir = Path(__file__).resolve().parent.parent.parent
         self.player = None
         self.is_loading = False
         self.is_dragging_progress = False
@@ -699,10 +697,10 @@ class AudioPlayerGUI:
     def get_selected_hrtf_path(self):
         value = self.hrtf_path_value.get()
         if value == "Default FABIAN HRTF":
-            local_default = self.app_dir / self.DEFAULT_HRTF_FILE
+            local_default = self.app_dir / DEFAULT_HRTF_FILE
             if local_default.exists():
                 return str(local_default)
-            return self.DEFAULT_HRTF_FILE
+            return DEFAULT_HRTF_FILE
         return value
 
     def get_headphone_names(self):

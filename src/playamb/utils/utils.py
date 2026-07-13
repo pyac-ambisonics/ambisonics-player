@@ -4,6 +4,9 @@ import numpy as np
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+# the src/ folder as project_root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_HRTF_FILE = "resources/default_hrtf/FABIAN_HRIR_measured_HATO_0.sofa"
 
 def resolve_path(path):
         if path is None:
@@ -17,11 +20,18 @@ def resolve_path(path):
 
         if candidate.is_absolute():
             return candidate
+        
+        # try to locate from program root
+        root_candidate = _PROJECT_ROOT / candidate
+        if root_candidate.exists():
+            return root_candidate
 
+        # try to locate relative to utils.py
         local_candidate = Path(__file__).resolve().parent / candidate
         if local_candidate.exists():
             return local_candidate
 
+        # couldn't resolve
         return candidate
 
 def ambix_channels_to_order(num_channels: int) -> int:

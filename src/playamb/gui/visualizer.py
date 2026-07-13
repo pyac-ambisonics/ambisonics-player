@@ -12,6 +12,8 @@ import numpy as np
 from collections import namedtuple
 from tkinter import filedialog, messagebox
 
+from playamb.utils.utils import resolve_path
+
 Angle = namedtuple('Angle', 'x y z')
 """Named tuple holding roll, pitch, and yaw cosine/sine components."""
 
@@ -42,7 +44,7 @@ class Obj:
         vertices       = []
 
         # populate from file
-        with open(filename) as file:
+        with open(resolve_path(filename)) as file:
             for line in file:
                 # use a generator to stop checking line early if possible
                 if all(not line.startswith(relevant)

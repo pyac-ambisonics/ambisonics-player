@@ -10,7 +10,7 @@ from shroom.utils.rotation_utils import wigner_d_matrix
 from scipy.spatial.transform import Rotation
 
 from playamb.audio.engine.hrtf import HRTF, Processing
-from src.playamb.audio.rotation.rotation import RotationMatrix
+from playamb.audio.rotation.rotation import RotationMatrix
 from playamb.utils.utils import next_power_of_two
 
 class SphericalHarmonics:
