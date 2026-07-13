@@ -1,4 +1,4 @@
-from audio_player import AudioPlayer
+from src.audio.engine.audio_player import AudioPlayer
 
 
 def print_help():

@@ -2,11 +2,11 @@ import numpy as np
 import sounddevice as sd
 import queue
 import threading
-from ambisonics_file_English import AmbisonicsFile
-from spherical import SphericalHarmonics
 import soundfile as sf
-from utils import next_power_of_two
 
+from src.playamb.audio.data.ambifile import AmbisonicsFile
+from playamb.audio.engine.spherical import SphericalHarmonics
+from playamb.utils.utils import next_power_of_two
 
 class AudioPlayer:
     """

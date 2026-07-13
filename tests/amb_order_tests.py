@@ -2,9 +2,8 @@
 import sys
 sys.path.append('../')
 
-from hrtf import HRTF
-from spherical import SphericalHarmonics
-from ambisonics_file_English import AmbisonicsFile
+from src.playamb import HRTF, SphericalHarmonics, AmbisonicsFile
+
 import time
 import soundfile as sf
 

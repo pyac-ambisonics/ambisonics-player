@@ -8,12 +8,12 @@ from queue import Queue
 from tkinter import filedialog, messagebox
 from tkinter import ttk
 
-from ambisonics_file_English import AmbisonicsFile
-from audio_player import AudioPlayer
-from head_tracking import HeadTracker, DemoHeadTracker, OrientationState
-from hrtf import HRTF
-from spherical import SphericalHarmonics
-from visualizer import Obj
+from src.playamb.audio.data.ambifile import AmbisonicsFile
+from src.playamb.audio.engine.player import AudioPlayer
+from src.playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
+from playamb.audio.engine.hrtf import HRTF
+from playamb.audio.engine.spherical import SphericalHarmonics
+from playamb.gui.visualizer import Obj
 
 
 class AudioPlayerGUI:
@@ -502,7 +502,7 @@ class AudioPlayerGUI:
         self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(False))
 
         # create visualizer instance form .obj file and draw the object
-        self._visualizer = Obj("./resources/virtualhead.obj", self.tracking_canvas, 
+        self._visualizer = Obj("resources/virtualhead.obj", self.tracking_canvas, 
                                position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
                             )
 

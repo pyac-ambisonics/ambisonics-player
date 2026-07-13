@@ -4,7 +4,8 @@ import numpy as np
 import pooch
 import spharpy
 import shroom.utils.math_utils as sh_util
-from utils import resolve_path
+
+from playamb.utils.utils import resolve_path
 
 class HRTF:
     """

@@ -1,3 +1,0 @@
-- Drop down list for headphone model selection. list of models will be provided soon (kylan)
-    - Done, added to SH-HRTF repository
-- transport bar in GUI to pick start offset on a line

@@ -1,12 +1,13 @@
 """
-A script that generates a set of rotation matrices for orders 1-7. These matrices can then be loaded
+A class providing utility to generate a set of rotation matrices for orders 1-7. These matrices can then be loaded
 and hardswapped to make the rotation faster and make realtime computation achievable.
 """
 
 import numpy as np
 import shroom.utils.rotation_utils as rot_utils
 from pathlib import Path
-from utils import resolve_path
+
+from playamb.utils.utils import resolve_path
 
 class RotationMatrix:
     """

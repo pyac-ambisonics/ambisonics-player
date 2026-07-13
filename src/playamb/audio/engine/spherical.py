@@ -3,14 +3,15 @@
 import numpy as np
 import pyfar as pf
 import spharpy as sh
-import utils
 import time
 import threading
 import queue
 from shroom.utils.rotation_utils import wigner_d_matrix
-from hrtf import HRTF, Processing
-from rotation_matrix import RotationMatrix
 from scipy.spatial.transform import Rotation
+
+from playamb.audio.engine.hrtf import HRTF, Processing
+from src.playamb.audio.rotation.rotation import RotationMatrix
+from playamb.utils.utils import next_power_of_two
 
 class SphericalHarmonics:
     """
@@ -115,7 +116,7 @@ class SphericalHarmonics:
         *_, pad_to_length = self.hrir_nm.shape
 
         # update this later by calling update_hrirs_fft() once we know the desired fft length
-        self.hrir_nm_fft = np.fft.fft(self.hrir_nm, utils.next_power_of_two(pad_to_length), axis=-1)
+        self.hrir_nm_fft = np.fft.fft(self.hrir_nm, next_power_of_two(pad_to_length), axis=-1)
 
         # create SH rotation unit
         self.rotation = RotationMatrix()
@@ -172,7 +173,7 @@ class SphericalHarmonics:
         
         # prepare hrir_nm_fft
         if block_size is None:
-            block_size = utils.next_power_of_two(self.get_IR_length())
+            block_size = next_power_of_two(self.get_IR_length())
         self.update_hrirs_fft(block_size)
         
     def get_IR_length(self):
