@@ -304,9 +304,20 @@ class AudioPlayerGUI:
         self.progress_slider.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 4))
         self.progress_slider.bind("<ButtonPress-1>", self.on_progress_press)
         self.progress_slider.bind("<ButtonRelease-1>", self.on_progress_release)
+
+        ttk.Label(
+            card,
+            text="Start Offset (s)",
+            background="white",
+            font=("Arial", 10, "bold"),
+        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
+        self.offset_entry = ttk.Entry(card, textvariable=self.offset_value, width=12)
+        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(16, 0))
+        self.offset_button = ttk.Button(card, text="Set Offset", command=self.set_offset)
+        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(16, 0))
         
         ttk.Label(card, text="Volume", background="white", font=("Arial", 10, "bold")).grid(
-            row=3, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(16, 0)
         )
         self.volume_slider = ttk.Scale(
             card,
@@ -316,7 +327,7 @@ class AudioPlayerGUI:
             variable=self.volume_value,
             command=self.set_volume,
         )
-        self.volume_slider.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.volume_slider.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
         self.volume_display = ttk.Label(
             card,
             textvariable=self.volume_display_value,
@@ -324,7 +335,7 @@ class AudioPlayerGUI:
             width=6,
             font=("Consolas", 10),
         )
-        self.volume_display.grid(row=3, column=4, sticky="w", pady=(16, 0))
+        self.volume_display.grid(row=4, column=4, sticky="w", pady=(16, 0))
 
         card.columnconfigure(4, weight=1)
 
@@ -365,21 +376,10 @@ class AudioPlayerGUI:
 
         ttk.Label(
             card,
-            text="Start Offset (s)",
-            background="white",
-            font=("Arial", 10, "bold"),
-        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
-        self.offset_entry = ttk.Entry(card, textvariable=self.offset_value, width=12)
-        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(16, 0))
-        self.offset_button = ttk.Button(card, text="Set Offset", command=self.set_offset)
-        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(16, 0))
-
-        ttk.Label(
-            card,
             text="Headphone Filter",
             background="white",
             font=("Arial", 10, "bold"),
-        ).grid(row=4, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
         self.headphone_box = ttk.Combobox(
             card,
             textvariable=self.headphone_value,
@@ -387,23 +387,23 @@ class AudioPlayerGUI:
             state="readonly",
             width=36,
         )
-        self.headphone_box.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
-            row=5, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(16, 0)
         )
         ttk.Label(card, textvariable=self.hrtf_path_value, background="white").grid(
-            row=5, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0)
+            row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0)
         )
         self.hrtf_button = ttk.Button(card, text="Browse", command=self.select_hrtf_file)
-        self.hrtf_button.grid(row=5, column=4, sticky="w", pady=(16, 0))
+        self.hrtf_button.grid(row=4, column=4, sticky="w", pady=(16, 0))
 
         self.apply_settings_button = ttk.Button(card, text="Apply Settings", command=self.apply_decoder_settings)
-        self.apply_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button.grid(row=4, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
         self.apply_settings_button.configure(state=tk.DISABLED)
 
         ttk.Label(card, textvariable=self.loaded_settings_text, style="SmallInfo.TLabel").grid(
-            row=6, column=0, columnspan=6, sticky="w", pady=(12, 0)
+            row=5, column=0, columnspan=6, sticky="w", pady=(12, 0)
         )
 
         card.columnconfigure(3, weight=1)
@@ -1135,6 +1135,7 @@ class AudioPlayerGUI:
             self._update_apply_button()
             self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
+            self.player.position = 0
             self.time_text.set(
                 f"{self.format_time(0.0)} / {self.format_time(self.player.get_duration())}"
             )
