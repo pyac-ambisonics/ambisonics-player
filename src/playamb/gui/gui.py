@@ -423,11 +423,11 @@ class AudioPlayerGUI:
         self.pitch_slider = self.create_rotation_slider(card, "Pitch Y", self.pitch_value, 2)
         self.roll_slider = self.create_rotation_slider(card, "Roll X", self.roll_value, 3)
 
-        self.rotation_button = ttk.Button(card, text="Apply Rotation", command=self.apply_rotation)
-        self.rotation_button.grid(row=4, column=0, sticky="w", pady=(16, 0))
+        # self.rotation_button = ttk.Button(card, text="Apply Rotation", command=self.apply_rotation)
+        # self.rotation_button.grid(row=4, column=0, sticky="w", pady=(16, 0))
 
         self.reset_rotation_button = ttk.Button(card, text="Reset Rotation", command=self.reset_rotation)
-        self.reset_rotation_button.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.reset_rotation_button.grid(row=4, column=0, sticky="w", padx=(12, 0), pady=(16, 0))
 
         #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
         #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
@@ -543,7 +543,7 @@ class AudioPlayerGUI:
             to=180.0,
             orient=tk.HORIZONTAL,
             variable=variable,
-            command=lambda _value: self.update_rotation_label(),
+            command=lambda _value: self.apply_rotation(),
         )
         slider.grid(row=row, column=1, columnspan=4, sticky="ew", padx=(14, 18), pady=(14, 0))
         return slider
@@ -1356,6 +1356,7 @@ class AudioPlayerGUI:
     def draw_head_tracking_visualizer(self, orientation):
         ypr = [orientation.yaw, orientation.pitch, orientation.roll]
         self._visualizer.draw(rotation=ypr)
+
 
     # ==============================================================
     # Info update
