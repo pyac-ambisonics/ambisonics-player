@@ -64,6 +64,7 @@ class AudioPlayerGUI:
         self.block_size_value = tk.StringVar(value="1024")
         self.hrtf_path_value = tk.StringVar(value="Default FABIAN HRTF")
         self.headphone_value = tk.StringVar(value="Diffuse Field Equalization")
+        self.hp_sample_value = tk.StringVar(value="512")
         self.loaded_settings_text = tk.StringVar(value="Loaded settings: none")
         self.decoder_note = tk.StringVar(
             value="Order, buffer size, HRTF, and headphone filter are applied when loading a file."
@@ -397,7 +398,7 @@ class AudioPlayerGUI:
         )
         self.filter_size_box = ttk.Combobox(
             card,
-            textvariable=self.order_value,
+            textvariable=self.hp_sample_value,
             values=["128", "256", "512", "1024", "2048", "4096"],
             state="readonly",
             width=10,
@@ -862,12 +863,13 @@ class AudioPlayerGUI:
         block_size = self.get_block_size()
         gain = float(self.volume_value.get())
         headphone_name = self.headphone_value.get()
+        hp_samples = self.hp_sample_value.get()
         hrtf_path = self.get_selected_hrtf_path()
         app_dir = str(self.app_dir)
 
         self.set_loading(True, "Loading AmbiX and preprocessing HRTF. Controls are disabled.")
 
-        def worker(path, requested_order, requested_block_size, requested_gain, hrtf_file, headphone, cwd):
+        def worker(path, requested_order, requested_block_size, requested_gain, hrtf_file, headphone, requested_hp_samples, cwd):
             old_cwd = os.getcwd()
             try:
                 os.chdir(cwd)
@@ -886,8 +888,8 @@ class AudioPlayerGUI:
                     )
 
                 normalized_hp = None if headphone in (None, "", "None") else headphone
-                normalized_hrtf = self._normalize_hrtf_path(hrtf_path)
-                cache_key = (normalized_hrtf, normalized_hp, ambix.get_order())
+                normalized_hrtf = self._normalize_hrtf_path(hrtf_file)
+                cache_key = (normalized_hrtf, normalized_hp, ambix.get_order(), requested_hp_samples)
                 if cache_key in self._decoder_cache:
                     hrtf, sh = self._decoder_cache[cache_key]
                     # restart the rotation on loading a cached SH
@@ -896,7 +898,7 @@ class AudioPlayerGUI:
                 else:
                     hrtf = HRTF(hrtf_file)
                     if headphone != "None":
-                        hrtf.load_hp_filter(headphone)
+                        hrtf.load_hp_filter(headphone, requested_hp_samples)
                     sh = SphericalHarmonics(
                         hrtf=hrtf,
                         sampling_rate=ambix.get_samplerate(),
@@ -928,7 +930,7 @@ class AudioPlayerGUI:
 
         threading.Thread(
             target=worker,
-            args=(file_path, order, block_size, gain, hrtf_path, headphone_name, app_dir),
+            args=(file_path, order, block_size, gain, hrtf_path, headphone_name, hp_samples, app_dir),
             daemon=True,
         ).start()
 
@@ -939,6 +941,7 @@ class AudioPlayerGUI:
         requested_order = self.get_order()
         requested_block_size = self.get_block_size()
         requested_hp = self.headphone_value.get()
+        requested_hp_samples = self.hp_sample_value.get()
         requested_hrtf = self.get_selected_hrtf_path()
 
         if requested_hp in (None, "", "None"):
@@ -951,7 +954,7 @@ class AudioPlayerGUI:
         self.update_event.clear()
 
         # the worker thread setting up all new variables
-        def update_decoder(new_hrtf=None, new_hp=None, new_block_size=None, new_order=None):
+        def update_decoder(new_hrtf=None, new_hp=None, new_hp_samples=None, new_block_size=None, new_order=None):
             try: 
                 player = self.player
                 if player is None:
@@ -959,6 +962,7 @@ class AudioPlayerGUI:
                 
                 current_hrtf = self._normalize_hrtf_path(getattr(player.sh.hrtf, "path", None))
                 current_hp = getattr(player.sh.hrtf, "current_filter", None)
+                current_hp_samples = player.sh.hrtf.hrirs.n_samples
                 current_block_size = player.ambi_file.get_chunk_size()
                 current_order = player.ambi_file.get_order()
                 
@@ -969,6 +973,10 @@ class AudioPlayerGUI:
                 change = False
                 needs_rebuild = False
                 order_warning = None
+                build_hp = False
+
+                hp = current_hp
+                hp_samples = current_hp_samples
 
                 if new_hrtf is not None and new_hrtf != current_hrtf:
                     print("Updating HRTF")
@@ -979,11 +987,22 @@ class AudioPlayerGUI:
 
                 if new_hp != current_hp:
                     print("Updating HP Filter")
-                    # hp filter changed
                     # calculate new hp_filter
-                    self.player.sh.hrtf.load_hp_filter(new_hp)
+                    hp = new_hp
                     change = True
                     needs_rebuild = True
+                    build_hp = True
+
+                if new_hp_samples != current_hp_samples:
+                    print("Updating HP Filter Sample Size")
+                    hp_samples = new_hp_samples
+                    change = True
+                    needs_rebuild = True
+                    build_hp = True
+
+                if build_hp:
+                    # calculate new hp_filter
+                    self.player.sh.hrtf.load_hp_filter(hp, hp_samples)
 
                 if new_block_size is not None and new_block_size != current_block_size:
                     print("Updating Buffer Size")
@@ -1012,8 +1031,7 @@ class AudioPlayerGUI:
                     # check cache before rebuilding
                     rebuild_order = player.ambi_file.get_order()
                     rebuild_hrtf = new_hrtf if new_hrtf is not None else current_hrtf
-                    rebuild_hp = new_hp
-                    rebuild_key = (rebuild_hrtf, rebuild_hp, rebuild_order)
+                    rebuild_key = (rebuild_hrtf, hp, rebuild_order, hp_samples)
 
                     if rebuild_key in self._decoder_cache:
                         _, new_sh = self._decoder_cache[rebuild_key]
@@ -1044,7 +1062,7 @@ class AudioPlayerGUI:
                     # Update decoder cache with rebuilt HRTF+SH
                     cached_hrtf_path = new_hrtf if new_hrtf is not None else current_hrtf
                     cached_hp = new_hp if new_hp is not None else current_hp
-                    cache_key = (cached_hrtf_path, cached_hp, player.ambi_file.get_order())
+                    cache_key = (cached_hrtf_path, cached_hp, player.ambi_file.get_order(), hp_samples)
                     self._decoder_cache[cache_key] = (player.sh.hrtf, new_sh)
 
                 if change:
@@ -1070,7 +1088,7 @@ class AudioPlayerGUI:
         # starting worker thread
         threading.Thread(
             target=update_decoder,
-            args=(requested_hrtf, requested_hp, requested_block_size, requested_order),
+            args=(requested_hrtf, requested_hp, requested_hp_samples, requested_block_size, requested_order),
             daemon=True,
         ).start()
 
@@ -1387,7 +1405,7 @@ class AudioPlayerGUI:
             return
 
         try:
-            yaw, pitch, roll = 0.0
+            yaw = pitch = roll = 0.0
             if self.yaw_check_val.get():
                 yaw = float(self.yaw_value.get())
             if self.pitch_check_val.get():
