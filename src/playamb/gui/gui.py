@@ -67,7 +67,7 @@ class AudioPlayerGUI:
         self.hp_sample_value = tk.StringVar(value="512")
         self.loaded_settings_text = tk.StringVar(value="Loaded settings: none")
         self.decoder_note = tk.StringVar(
-            value="Order, buffer size, HRTF, and headphone filter are applied when loading a file."
+            value="Order, buffer size, HRTF, and headphone filter can only be applied when playback is stopped."
         )
         self.update_event = threading.Event()
 
@@ -1514,7 +1514,12 @@ class AudioPlayerGUI:
     def update_head_tracking_loop(self):
         if self.rotation_tracker.is_running():
             orientation = self.rotation_tracker.orientation_state.get()
-        
+            if not self.yaw_check_val.get():
+                orientation.yaw = 0.0
+            if not self.pitch_check_val.get():
+                orientation.pitch = 0.0
+            if not self.roll_check_val.get():
+                orientation.roll = 0.0
             self.yaw_value.set(orientation.yaw)
             self.pitch_value.set(orientation.pitch)
             self.roll_value.set(orientation.roll)
