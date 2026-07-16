@@ -13,7 +13,7 @@ from playamb.audio.engine.player import AudioPlayer
 from playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
 from playamb.audio.engine.hrtf import HRTF
 from playamb.audio.engine.spherical import SphericalHarmonics
-from playamb.gui.visualizer import Obj
+from playamb.gui.visualizer import Visual3D
 from playamb.utils.utils import DEFAULT_HRTF_FILE
 
 class AudioPlayerGUI:
@@ -304,9 +304,20 @@ class AudioPlayerGUI:
         self.progress_slider.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 4))
         self.progress_slider.bind("<ButtonPress-1>", self.on_progress_press)
         self.progress_slider.bind("<ButtonRelease-1>", self.on_progress_release)
+
+        ttk.Label(
+            card,
+            text="Start Offset (s)",
+            background="white",
+            font=("Arial", 10, "bold"),
+        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
+        self.offset_entry = ttk.Entry(card, textvariable=self.offset_value, width=12)
+        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(16, 0))
+        self.offset_button = ttk.Button(card, text="Set Offset", command=self.set_offset)
+        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(16, 0))
         
         ttk.Label(card, text="Volume", background="white", font=("Arial", 10, "bold")).grid(
-            row=3, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(16, 0)
         )
         self.volume_slider = ttk.Scale(
             card,
@@ -316,7 +327,7 @@ class AudioPlayerGUI:
             variable=self.volume_value,
             command=self.set_volume,
         )
-        self.volume_slider.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.volume_slider.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
         self.volume_display = ttk.Label(
             card,
             textvariable=self.volume_display_value,
@@ -324,7 +335,7 @@ class AudioPlayerGUI:
             width=6,
             font=("Consolas", 10),
         )
-        self.volume_display.grid(row=3, column=4, sticky="w", pady=(16, 0))
+        self.volume_display.grid(row=4, column=4, sticky="w", pady=(16, 0))
 
         card.columnconfigure(4, weight=1)
 
@@ -365,21 +376,10 @@ class AudioPlayerGUI:
 
         ttk.Label(
             card,
-            text="Start Offset (s)",
-            background="white",
-            font=("Arial", 10, "bold"),
-        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
-        self.offset_entry = ttk.Entry(card, textvariable=self.offset_value, width=12)
-        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(16, 0))
-        self.offset_button = ttk.Button(card, text="Set Offset", command=self.set_offset)
-        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(16, 0))
-
-        ttk.Label(
-            card,
             text="Headphone Filter",
             background="white",
             font=("Arial", 10, "bold"),
-        ).grid(row=4, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
         self.headphone_box = ttk.Combobox(
             card,
             textvariable=self.headphone_value,
@@ -387,23 +387,23 @@ class AudioPlayerGUI:
             state="readonly",
             width=36,
         )
-        self.headphone_box.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
-            row=5, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(16, 0)
         )
         ttk.Label(card, textvariable=self.hrtf_path_value, background="white").grid(
-            row=5, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0)
+            row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0)
         )
         self.hrtf_button = ttk.Button(card, text="Browse", command=self.select_hrtf_file)
-        self.hrtf_button.grid(row=5, column=4, sticky="w", pady=(16, 0))
+        self.hrtf_button.grid(row=4, column=4, sticky="w", pady=(16, 0))
 
         self.apply_settings_button = ttk.Button(card, text="Apply Settings", command=self.apply_decoder_settings)
-        self.apply_settings_button.grid(row=5, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button.grid(row=4, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
         self.apply_settings_button.configure(state=tk.DISABLED)
 
         ttk.Label(card, textvariable=self.loaded_settings_text, style="SmallInfo.TLabel").grid(
-            row=6, column=0, columnspan=6, sticky="w", pady=(12, 0)
+            row=5, column=0, columnspan=6, sticky="w", pady=(12, 0)
         )
 
         card.columnconfigure(3, weight=1)
@@ -423,11 +423,11 @@ class AudioPlayerGUI:
         self.pitch_slider = self.create_rotation_slider(card, "Pitch Y", self.pitch_value, 2)
         self.roll_slider = self.create_rotation_slider(card, "Roll X", self.roll_value, 3)
 
-        self.rotation_button = ttk.Button(card, text="Apply Rotation", command=self.apply_rotation)
-        self.rotation_button.grid(row=4, column=0, sticky="w", pady=(16, 0))
+        # self.rotation_button = ttk.Button(card, text="Apply Rotation", command=self.apply_rotation)
+        # self.rotation_button.grid(row=4, column=0, sticky="w", pady=(16, 0))
 
         self.reset_rotation_button = ttk.Button(card, text="Reset Rotation", command=self.reset_rotation)
-        self.reset_rotation_button.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.reset_rotation_button.grid(row=4, column=0, sticky="w", padx=(12, 0), pady=(16, 0))
 
         #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
         #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
@@ -500,7 +500,7 @@ class AudioPlayerGUI:
         self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(False))
 
         # create visualizer instance form .obj file and draw the object
-        self._visualizer = Obj("resources/virtualhead.obj", self.tracking_canvas, 
+        self._visualizer = Visual3D("resources/virtualhead.obj", self.tracking_canvas, 
                                position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
                             )
 
@@ -543,7 +543,7 @@ class AudioPlayerGUI:
             to=180.0,
             orient=tk.HORIZONTAL,
             variable=variable,
-            command=lambda _value: self.update_rotation_label(),
+            command=lambda _value: self.apply_rotation(),
         )
         slider.grid(row=row, column=1, columnspan=4, sticky="ew", padx=(14, 18), pady=(14, 0))
         return slider
@@ -1135,6 +1135,7 @@ class AudioPlayerGUI:
             self._update_apply_button()
             self.playback_status.set("Status: Stopped")
             self.progress_value.set(0.0)
+            self.player.position = 0
             self.time_text.set(
                 f"{self.format_time(0.0)} / {self.format_time(self.player.get_duration())}"
             )
@@ -1355,6 +1356,7 @@ class AudioPlayerGUI:
     def draw_head_tracking_visualizer(self, orientation):
         ypr = [orientation.yaw, orientation.pitch, orientation.roll]
         self._visualizer.draw(rotation=ypr)
+
 
     # ==============================================================
     # Info update
