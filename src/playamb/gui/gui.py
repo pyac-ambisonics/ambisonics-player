@@ -1387,7 +1387,9 @@ class AudioPlayerGUI:
             return
 
         try:
-            yaw, pitch, roll = 0.0
+            yaw = 0.0
+            pitch = 0.0
+            roll = 0.0
             if self.yaw_check_val.get():
                 yaw = float(self.yaw_value.get())
             if self.pitch_check_val.get():
