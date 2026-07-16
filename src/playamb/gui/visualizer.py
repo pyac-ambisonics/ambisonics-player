@@ -18,7 +18,11 @@ Angle = namedtuple('Angle', 'x y z')
 """ Named tuple holding roll, pitch, and yaw cosine/sine components. """
 
 class Visual3D:
+<<<<<<< HEAD
     """ A drawable `.obj` mesh representation for Tk canvas rendering. """
+=======
+    '''A drawable `.obj` mesh representation for Tk canvas rendering.'''
+>>>>>>> main
     # .obj format specifications
     VERTEX, FACE = 'v', 'f'
     RELEVANTS = [relevant + ' ' for relevant in (VERTEX, FACE)]
@@ -26,6 +30,7 @@ class Visual3D:
     def __init__(self, filename, canvas, scale=500, position=[]*2,
                  rotation=None, zoom=10, line_colour='#0000FF', point_size=2,
                  point_colour='#FFFFFF'):
+<<<<<<< HEAD
         """
         Create a new Visual3D instance.
         
@@ -46,6 +51,9 @@ class Visual3D:
         line_colour : 
         """
 
+=======
+        ''' Create a new Visual3D instance. ''' 
+>>>>>>> main
         self._read_points(filename)
         self._init_display(canvas, scale, position, rotation, zoom,
                            line_colour, point_size, point_colour)

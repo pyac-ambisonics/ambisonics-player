@@ -4,7 +4,7 @@
         ├── audio
         │   ├── data
         │   ├── __init__.py
-        │   ├── ambitile.py
+        │   ├── ambifile.py
         │   ├── engine
         │   │   ├── __init__.py
         │   │   ├── hrtf.py

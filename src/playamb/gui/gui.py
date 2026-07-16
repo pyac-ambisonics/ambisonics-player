@@ -66,7 +66,7 @@ class AudioPlayerGUI:
         self.headphone_value = tk.StringVar(value="Diffuse Field Equalization")
         self.loaded_settings_text = tk.StringVar(value="Loaded settings: none")
         self.decoder_note = tk.StringVar(
-            value="Order, block size, HRTF, and headphone filter are applied when loading a file."
+            value="Order, buffer size, HRTF, and headphone filter are applied when loading a file."
         )
         self.update_event = threading.Event()
 
@@ -362,13 +362,13 @@ class AudioPlayerGUI:
         )
         self.order_box.grid(row=1, column=1, sticky="w", padx=(14, 18), pady=(16, 0))
 
-        ttk.Label(card, text="Block Size", background="white", font=("Arial", 10, "bold")).grid(
+        ttk.Label(card, text="Buffer Size", background="white", font=("Arial", 10, "bold")).grid(
             row=1, column=2, sticky="w", pady=(16, 0)
         )
         self.block_size_box = ttk.Combobox(
             card,
             textvariable=self.block_size_value,
-            values=["512", "1024", "2048", "4096"],
+            values=["128", "256", "512", "1024", "2048", "4096"],
             state="readonly",
             width=10,
         )
@@ -388,6 +388,11 @@ class AudioPlayerGUI:
             width=36,
         )
         self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        # Windows / macOS
+        self.headphone_box.bind("<MouseWheel>", self.__no_scroll)
+        # Linux (X11)
+        self.headphone_box.bind("<Button-4>", self.__no_scroll)
+        self.headphone_box.bind("<Button-5>", self.__no_scroll)
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
             row=4, column=0, sticky="w", pady=(16, 0)
@@ -508,6 +513,14 @@ class AudioPlayerGUI:
         card.columnconfigure(2, weight=0)
         card.columnconfigure(3, weight=0)
         card.columnconfigure(4, weight=0)
+
+    def __no_scroll(self, event):
+        """
+        Helper function that prevents the dafault action on scrolling when bound to a combobox.
+        """
+        # Disable mouse wheel scrolling on the combobox
+        # prevents the default action
+        return "break"
 
     def get_tracking_modes(self):
         modes = ["Off"]
@@ -914,7 +927,7 @@ class AudioPlayerGUI:
                     needs_rebuild = True
 
                 if new_block_size is not None and new_block_size != current_block_size:
-                    print("Updating Block Size")
+                    print("Updating Buffer Size")
                     # block size changed
                     # update block size in ambi_file. player gets the updates automatically
                     self.player.ambi_file.set_chunk_size(new_block_size)
@@ -940,7 +953,7 @@ class AudioPlayerGUI:
                     # check cache before rebuilding
                     rebuild_order = player.ambi_file.get_order()
                     rebuild_hrtf = new_hrtf if new_hrtf is not None else current_hrtf
-                    rebuild_hp = new_hp if new_hp is not None else current_hp
+                    rebuild_hp = new_hp
                     rebuild_key = (rebuild_hrtf, rebuild_hp, rebuild_order)
 
                     if rebuild_key in self._decoder_cache:
@@ -1371,7 +1384,7 @@ class AudioPlayerGUI:
                 f"{self.pipeline_status.get()}\n\n"
                 "Current GUI settings:\n"
                 f"Selected order: {self.order_value.get()}\n"
-                f"Block size: {self.block_size_value.get()} samples\n"
+                f"Playback buffer size: {self.block_size_value.get()} samples\n"
                 f"HRTF: {self.hrtf_path_value.get()}\n"
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_note.get()}\n"
@@ -1387,7 +1400,7 @@ class AudioPlayerGUI:
             f"{self.output_type.get()}\n"
             f"{self.pipeline_status.get()}\n"
             f"Selected order: {self.order_value.get()}\n"
-            f"Block size: {self.block_size_value.get()} samples\n"
+            f"Playback buffer size: {self.block_size_value.get()} samples\n"
             f"HRTF: {self.hrtf_path_value.get()}\n"
             f"Headphone filter: {self.headphone_value.get()}\n"
             f"{self.rotation_text.get()}\n"

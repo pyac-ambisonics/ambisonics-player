@@ -11,7 +11,7 @@ from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.audio.rotation.tracking import Orientation, OrientationState, DemoHeadTracker, HeadTracker
 from playamb.audio.rotation.rotation import RotationMatrix
 from playamb.gui.gui import AudioPlayerGUI
-from playamb.gui.gui import Obj
+from playamb.gui.gui import Visual3D
 from playamb.utils.utils import ambix_channels_to_order, next_power_of_two, order_to_channel_n, resolve_path
 
 __version__ = "0.1.0"
@@ -28,7 +28,7 @@ __all__ = [
     "HeadTracker",
     "RotationMatrix",
     "AudioPlayerGUI",
-    "Obj",
+    "Visual3D",
     "ambix_channels_to_order", 
     "next_power_of_two", 
     "order_to_channel_n", 
