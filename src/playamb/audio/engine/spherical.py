@@ -226,6 +226,7 @@ class SphericalHarmonics:
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
+        angles = -angles[0], angles[1], angles[2]
         rotation = Rotation.from_euler(convention, angles, degrees=True)
         alpha, beta, gamma = rotation.as_euler("zyz")
         new_D = self.rotation.wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
@@ -254,6 +255,7 @@ class SphericalHarmonics:
         convention : str
             A string identifying the used convention/order of the angles. 'zyx' is default.
         """
+        angles = -angles[0], angles[1], angles[2]
         try:
             self._rotation_queue.put_nowait((angles, convention))
         except queue.Full:
