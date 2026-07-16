@@ -1314,6 +1314,7 @@ class AudioPlayerGUI:
                 self.rotation_tracker.start()
             self.start_stop_tracking_button["text"] = "Stop Tracking"
 
+
         except Exception as error:
             self.tracking_status.set("Tracking: failed to start")
             print(f"[Head Tracking Error] {error}")
@@ -1328,7 +1329,6 @@ class AudioPlayerGUI:
         self.rotation_tracker.stop()
         self.start_stop_tracking_button["text"] = "Start Tracking"
         self.start_stop_tracking_button["state"] = "enabled"
-        #self.stop_tracking_button["state"] = "disabled"
         self.zero_tracker_button["state"] = "disabled"
         self.chirality_box["state"] = "disabled"
         self.tracking_status.set("Head tracking is off")
@@ -1340,7 +1340,8 @@ class AudioPlayerGUI:
                 self.rotation_tracker = self.head_tracker
                 self.chirality_box["state"] = "readonly"
             case "Off":
-                self.start_stop_tracking_button["state"] = "disabled"
+                self.start_stop_tracking_button.state(["disabled"])
+                print(self.tracking_mode.get())
 
         if reset_orientation:
             orientation = self.orientation_state.set(0.0, 0.0, 0.0, source="off")
