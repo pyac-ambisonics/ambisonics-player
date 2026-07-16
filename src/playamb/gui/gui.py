@@ -940,7 +940,7 @@ class AudioPlayerGUI:
                     # check cache before rebuilding
                     rebuild_order = player.ambi_file.get_order()
                     rebuild_hrtf = new_hrtf if new_hrtf is not None else current_hrtf
-                    rebuild_hp = new_hp if new_hp is not None else current_hp
+                    rebuild_hp = new_hp
                     rebuild_key = (rebuild_hrtf, rebuild_hp, rebuild_order)
 
                     if rebuild_key in self._decoder_cache:
