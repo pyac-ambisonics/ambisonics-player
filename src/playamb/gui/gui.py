@@ -80,6 +80,9 @@ class AudioPlayerGUI:
         self.yaw_value = tk.DoubleVar(value=0.0)
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
+        self.yaw_check_val = tk.BooleanVar(value=True)
+        self.pitch_check_val = tk.BooleanVar(value=False)
+        self.roll_check_val = tk.BooleanVar(value=False)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
         # self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(value="Hardware tracking status: not checked.")
@@ -388,11 +391,36 @@ class AudioPlayerGUI:
             width=36,
         )
         self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+
+        ttk.Label(card, text="HP Samples", background="white", font=("Arial", 10, "bold")).grid(
+            row=3, column=4, sticky="w", pady=(16, 0)
+        )
+        self.filter_size_box = ttk.Combobox(
+            card,
+            textvariable=self.order_value,
+            values=["128", "256", "512", "1024", "2048", "4096"],
+            state="readonly",
+            width=10,
+        )
+        self.filter_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(16, 0))
+
+        # make it so we don't accidentally scroll in comboboxes
         # Windows / macOS
         self.headphone_box.bind("<MouseWheel>", self.__no_scroll)
+        self.block_size_box.bind("<MouseWheel>", self.__no_scroll)
+        self.order_box.bind("<MouseWheel>", self.__no_scroll)
+        self.filter_size_box.bind("<MouseWheel>", self.__no_scroll)
         # Linux (X11)
         self.headphone_box.bind("<Button-4>", self.__no_scroll)
         self.headphone_box.bind("<Button-5>", self.__no_scroll)
+        self.block_size_box.bind("<Button-4>", self.__no_scroll)
+        self.block_size_box.bind("<Button-5>", self.__no_scroll)
+        self.order_box.bind("<Button-4>", self.__no_scroll)
+        self.order_box.bind("<Button-5>", self.__no_scroll)
+        self.filter_size_box.bind("<Button-4>", self.__no_scroll)
+        self.filter_size_box.bind("<Button-5>", self.__no_scroll)
+
+        # create
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
             row=4, column=0, sticky="w", pady=(16, 0)
@@ -433,6 +461,37 @@ class AudioPlayerGUI:
 
         self.reset_rotation_button = ttk.Button(card, text="Reset Rotation", command=self.reset_rotation)
         self.reset_rotation_button.grid(row=4, column=0, sticky="w", padx=(12, 0), pady=(16, 0))
+
+        # add options to enable or disable yaw-pitch-roll
+        # Create a container frame for the checkboxes
+        checkbox_frame = ttk.Frame(card)
+        checkbox_frame.grid(row=4, column=1, columnspan=3, sticky="w", padx=16, pady=(16, 12))
+        self.yaw_check = ttk.Checkbutton(
+            checkbox_frame,
+            text="Enable Yaw",
+            variable=self.yaw_check_val,
+            command=self.enable_yaw,
+        )
+        self.yaw_check.pack(side=tk.LEFT, padx=(0, 10))
+        self.pitch_check = ttk.Checkbutton(
+            checkbox_frame,
+            text="Enable Pitch",
+            variable=self.pitch_check_val,
+            command=self.enable_pitch,
+        )
+        self.pitch_check.pack(side=tk.LEFT, padx=(0, 10))
+        self.roll_check = ttk.Checkbutton(
+            checkbox_frame,
+            text="Enable Roll",
+            variable=self.roll_check_val,
+            command=self.enable_roll,
+        )
+        self.roll_check.pack(side=tk.LEFT, padx=(0, 10))
+
+        # set yaw, pitch, roll enabled or disabled
+        self.enable_yaw()
+        self.enable_pitch()
+        self.enable_roll()
 
         #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
         #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
@@ -502,7 +561,7 @@ class AudioPlayerGUI:
             row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(14, 0)
         )
 
-        self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(False))
+        self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(True))
 
         # create visualizer instance form .obj file and draw the object
         self._visualizer = Visual3D("resources/virtualhead.obj", self.tracking_canvas, 
@@ -595,7 +654,7 @@ class AudioPlayerGUI:
         if self.start_stop_tracking_button["text"]=="Start Tracking":
             self.start_head_tracking()            
         else:
-            self.stop_head_tracking(False)
+            self.stop_head_tracking(True)
 
     # ==============================================================
     # State helpers
@@ -664,7 +723,7 @@ class AudioPlayerGUI:
         """Apply current decoder settings."""
         if not self.has_loaded_player():
             return
-        self.stop_head_tracking(reset_orientation=False)
+        # self.stop_head_tracking(reset_orientation=False)
         self.player.stop(reset_position=False)
         self.decoder_note.set("Applying decoder settings...")
         self.update_decoder_settings()
@@ -788,7 +847,7 @@ class AudioPlayerGUI:
             except Exception as e:
                 print(e)
                 pass
-        self.stop_head_tracking(reset_orientation=False)
+        #self.stop_head_tracking(reset_orientation=False)
 
         file_name = os.path.basename(file_path)
         self.selected_file.set(f"AmbiX file selected: {file_name}")
@@ -1250,14 +1309,91 @@ class AudioPlayerGUI:
             f"Roll {self.roll_value.get():.1f}"
         )
 
+    def enable_yaw(self):
+        """
+        Enables or disables the Yaw slider, depending on the state of the Yaw Checkbox
+        """
+        try:
+            if self.yaw_check_val.get():
+                # enable yaw slider
+                self.yaw_slider.configure(state=tk.NORMAL)
+            else:
+                # disable yaw slider
+                self.yaw_slider.configure(state=tk.DISABLED)
+                self.yaw_value.set(0.0)
+                pass
+        except Exception as error:
+            self._handle_error("Error", error)
+        self.apply_rotation()
+
+    def enable_pitch(self):
+        """
+        Enables or disables the Pitch slider, depending on the state of the Pitch Checkbox
+        """
+        try:
+            if self.pitch_check_val.get():
+                # enable yaw slider
+                self.pitch_slider.configure(state=tk.NORMAL)
+            else:
+                # disable yaw slider
+                self.pitch_slider.configure(state=tk.DISABLED)
+                self.pitch_value.set(0.0)
+        except Exception as error:
+            self._handle_error("Error", error)
+        self.apply_rotation()
+
+    def enable_roll(self):
+        """
+        Enables or disables the Roll slider, depending on the state of the Roll Checkbox
+        """
+        try:
+            if self.roll_check_val.get():
+                # enable yaw slider
+                self.roll_slider.configure(state=tk.NORMAL)
+            else:
+                # disable yaw slider
+                self.roll_slider.configure(state=tk.DISABLED)
+                self.roll_value.set(0.0)
+        except Exception as error:
+            self._handle_error("Error", error)
+        self.apply_rotation()
+
+    def set_sliders_state(self, enabled):
+        """
+        Enables or disables the rotation sliders, depending on the set bool.
+
+        Parameters
+        ----------
+        enabled : bool
+            Enables or disables the rotation sliders in the GUI
+        """
+        try:
+            if enabled:
+                # enable sliders
+                self.yaw_slider.configure(state=tk.NORMAL)
+                self.pitch_slider.configure(state=tk.NORMAL)
+                self.roll_slider.configure(state=tk.NORMAL)
+            else:
+                # disable sliders
+                self.yaw_slider.configure(state=tk.DISABLED)
+                self.pitch_slider.configure(state=tk.DISABLED)
+                self.roll_slider.configure(state=tk.DISABLED)
+        except Exception as error:
+            self._handle_error("Error", error)
+
+
     def apply_rotation(self):
         if not self.has_loaded_player():
             return
 
         try:
-            yaw = float(self.yaw_value.get())
-            pitch = float(self.pitch_value.get())
-            roll = float(self.roll_value.get())
+            yaw, pitch, roll = 0.0
+            if self.yaw_check_val.get():
+                yaw = float(self.yaw_value.get())
+            if self.pitch_check_val.get():
+                pitch = float(self.pitch_value.get())
+            if self.roll_check_val.get():
+                roll = float(self.roll_value.get())
             orientation = self.orientation_state.set(yaw, pitch, roll, source="manual")
             self.apply_orientation_to_audio(orientation)
             self.update_rotation_label()
@@ -1291,6 +1427,7 @@ class AudioPlayerGUI:
         match self.tracking_mode.get():
             case "Demo":
                 self.rotation_tracker = self.demo_tracker
+                self.set_sliders_state(False)
             case "Hardware":
                 if "Hardware" not in self.get_tracking_modes():
                     self.tracking_status.set("Tracking: Hardware unavailable")
@@ -1301,9 +1438,11 @@ class AudioPlayerGUI:
                     return
                 try:
                     self.rotation_tracker = self.head_tracker
+                    self.set_sliders_state(False)
                 except Exception as e:
                     print(f"Something went wrong: {e}")
             case "Off":
+                self.set_sliders_state(True)
                 return
 
         try:
@@ -1332,6 +1471,7 @@ class AudioPlayerGUI:
         self.zero_tracker_button["state"] = "disabled"
         self.chirality_box["state"] = "disabled"
         self.tracking_status.set("Head tracking is off")
+        self.set_sliders_state(True)
 
         match self.tracking_mode.get():
             case "Demo":
