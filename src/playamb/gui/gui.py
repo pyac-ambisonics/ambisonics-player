@@ -388,6 +388,11 @@ class AudioPlayerGUI:
             width=36,
         )
         self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        # Windows / macOS
+        self.headphone_box.bind("<MouseWheel>", self.__no_scroll)
+        # Linux (X11)
+        self.headphone_box.bind("<Button-4>", self.__no_scroll)
+        self.headphone_box.bind("<Button-5>", self.__no_scroll)
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
             row=4, column=0, sticky="w", pady=(16, 0)
@@ -508,6 +513,14 @@ class AudioPlayerGUI:
         card.columnconfigure(2, weight=0)
         card.columnconfigure(3, weight=0)
         card.columnconfigure(4, weight=0)
+
+    def __no_scroll(self, event):
+        """
+        Helper function that prevents the dafault action on scrolling when bound to a combobox.
+        """
+        # Disable mouse wheel scrolling on the combobox
+        # prevents the default action
+        return "break"
 
     def get_tracking_modes(self):
         modes = ["Off"]
