@@ -13,7 +13,7 @@ from playamb.audio.engine.player import AudioPlayer
 from playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
 from playamb.audio.engine.hrtf import HRTF
 from playamb.audio.engine.spherical import SphericalHarmonics
-from playamb.gui.visualizer import Obj
+from playamb.gui.visualizer import Visual3D
 from playamb.utils.utils import DEFAULT_HRTF_FILE
 
 class AudioPlayerGUI:
@@ -505,7 +505,7 @@ class AudioPlayerGUI:
         self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(False))
 
         # create visualizer instance form .obj file and draw the object
-        self._visualizer = Obj("resources/virtualhead.obj", self.tracking_canvas, 
+        self._visualizer = Visual3D("resources/virtualhead.obj", self.tracking_canvas, 
                                position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
                             )
 
