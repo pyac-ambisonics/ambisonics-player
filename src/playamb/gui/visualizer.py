@@ -17,7 +17,7 @@ from playamb.utils.utils import resolve_path
 Angle = namedtuple('Angle', 'x y z')
 """Named tuple holding roll, pitch, and yaw cosine/sine components."""
 
-class Obj:
+class Visual3D:
     '''A drawable `.obj` mesh representation for Tk canvas rendering.'''
     # .obj format specifications
     VERTEX, FACE = 'v', 'f'
@@ -26,7 +26,7 @@ class Obj:
     def __init__(self, filename, canvas, scale=500, position=[]*2,
                  rotation=None, zoom=10, line_colour='#0000FF', point_size=2,
                  point_colour='#FFFFFF'):
-        ''' Create a new Obj instance. ''' 
+        ''' Create a new Visual3D instance. ''' 
         self._read_points(filename)
         self._init_display(canvas, scale, position, rotation, zoom,
                            line_colour, point_size, point_colour)
