@@ -83,8 +83,8 @@ class AudioPlayerGUI:
         self.pitch_value = tk.DoubleVar(value=0.0)
         self.roll_value = tk.DoubleVar(value=0.0)
         self.yaw_check_val = tk.BooleanVar(value=True)
-        self.pitch_check_val = tk.BooleanVar(value=False)
-        self.roll_check_val = tk.BooleanVar(value=False)
+        self.pitch_check_val = tk.BooleanVar(value=True)
+        self.roll_check_val = tk.BooleanVar(value=True)
         self.rotation_text = tk.StringVar(value="Rotation: yaw 0.0, pitch 0.0, roll 0.0")
         # self.rotation_backend_text = tk.StringVar(value="Rotation backend: not loaded")
         self.rotation_note = tk.StringVar(value="Hardware tracking status: not checked.")
@@ -406,21 +406,21 @@ class AudioPlayerGUI:
         ttk.Label(card, text="HP Samples", background="white", font=("Arial", 10, "bold")).grid(
             row=3, column=4, sticky="w", pady=(10, 0)
         )
-        self.filter_size_box = ttk.Combobox(
+        self.hp_sample_size_box = ttk.Combobox(
             card,
             textvariable=self.hp_sample_value,
             values=["128", "256", "512", "1024", "2048", "4096"],
             state="readonly",
             width=10,
         )
-        self.filter_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(10, 0))
+        self.hp_sample_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(10, 0))
 
         # make it so we don't accidentally scroll in comboboxes
         # Windows / macOS
         self.headphone_box.bind("<MouseWheel>", self.__no_scroll)
         self.block_size_box.bind("<MouseWheel>", self.__no_scroll)
         self.order_box.bind("<MouseWheel>", self.__no_scroll)
-        self.filter_size_box.bind("<MouseWheel>", self.__no_scroll)
+        self.hp_sample_size_box.bind("<MouseWheel>", self.__no_scroll)
         # Linux (X11)
         self.headphone_box.bind("<Button-4>", self.__no_scroll)
         self.headphone_box.bind("<Button-5>", self.__no_scroll)
@@ -428,8 +428,8 @@ class AudioPlayerGUI:
         self.block_size_box.bind("<Button-5>", self.__no_scroll)
         self.order_box.bind("<Button-4>", self.__no_scroll)
         self.order_box.bind("<Button-5>", self.__no_scroll)
-        self.filter_size_box.bind("<Button-4>", self.__no_scroll)
-        self.filter_size_box.bind("<Button-5>", self.__no_scroll)
+        self.hp_sample_size_box.bind("<Button-4>", self.__no_scroll)
+        self.hp_sample_size_box.bind("<Button-5>", self.__no_scroll)
 
         # create
 
@@ -708,6 +708,7 @@ class AudioPlayerGUI:
         self.block_size_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.headphone_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.hrtf_button.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+        self.hp_sample_size_box.configure(state=tk.NORMAL if enabled else tk.DISABLED)
 
     def _normalize_hrtf_path(self, path):
         if path in (None, "", "Default FABIAN HRTF"):
@@ -1344,50 +1345,53 @@ class AudioPlayerGUI:
         """
         Enables or disables the Yaw slider, depending on the state of the Yaw Checkbox
         """
-        try:
-            if self.yaw_check_val.get():
-                # enable yaw slider
-                self.yaw_slider.configure(state=tk.NORMAL)
-            else:
-                # disable yaw slider
-                self.yaw_slider.configure(state=tk.DISABLED)
-                self.yaw_value.set(0.0)
-                pass
-        except Exception as error:
-            self._handle_error("Error", error)
-        self.apply_rotation()
+        if not self.rotation_tracker.is_running():
+            try:
+                if self.yaw_check_val.get():
+                    # enable yaw slider
+                    self.yaw_slider.configure(state=tk.NORMAL)
+                else:
+                    # disable yaw slider
+                    self.yaw_slider.configure(state=tk.DISABLED)
+                    self.yaw_value.set(0.0)
+                    pass
+            except Exception as error:
+                self._handle_error("Error", error)
+            self.apply_rotation()
 
     def enable_pitch(self):
         """
         Enables or disables the Pitch slider, depending on the state of the Pitch Checkbox
         """
-        try:
-            if self.pitch_check_val.get():
-                # enable yaw slider
-                self.pitch_slider.configure(state=tk.NORMAL)
-            else:
-                # disable yaw slider
-                self.pitch_slider.configure(state=tk.DISABLED)
-                self.pitch_value.set(0.0)
-        except Exception as error:
-            self._handle_error("Error", error)
-        self.apply_rotation()
+        if not self.rotation_tracker.is_running():
+            try:
+                if self.pitch_check_val.get():
+                    # enable yaw slider
+                    self.pitch_slider.configure(state=tk.NORMAL)
+                else:
+                    # disable yaw slider
+                    self.pitch_slider.configure(state=tk.DISABLED)
+                    self.pitch_value.set(0.0)
+            except Exception as error:
+                self._handle_error("Error", error)
+            self.apply_rotation()
 
     def enable_roll(self):
         """
         Enables or disables the Roll slider, depending on the state of the Roll Checkbox
         """
-        try:
-            if self.roll_check_val.get():
-                # enable yaw slider
-                self.roll_slider.configure(state=tk.NORMAL)
-            else:
-                # disable yaw slider
-                self.roll_slider.configure(state=tk.DISABLED)
-                self.roll_value.set(0.0)
-        except Exception as error:
-            self._handle_error("Error", error)
-        self.apply_rotation()
+        if not self.rotation_tracker.is_running():
+            try:
+                if self.roll_check_val.get():
+                    # enable yaw slider
+                    self.roll_slider.configure(state=tk.NORMAL)
+                else:
+                    # disable yaw slider
+                    self.roll_slider.configure(state=tk.DISABLED)
+                    self.roll_value.set(0.0)
+            except Exception as error:
+                self._handle_error("Error", error)
+            self.apply_rotation()
 
     def set_sliders_state(self, enabled):
         """
@@ -1501,7 +1505,7 @@ class AudioPlayerGUI:
             messagebox.showerror("Head Tracking Error", str(error))
             return
 
-        self.tracking_status.set(self.tracking_mode.get() + "head tracking is running")
+        self.tracking_status.set(self.tracking_mode.get() + " headtracking is running")
         self.playback_status.set("Status: " + self.tracking_mode.get() + " tracking")
 
     def stop_head_tracking(self, reset_orientation=True):
