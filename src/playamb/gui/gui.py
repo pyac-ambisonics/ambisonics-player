@@ -939,6 +939,11 @@ class AudioPlayerGUI:
             except Exception as error:
                 traceback.print_exc()
                 self._backend_load_queue.put(("error", str(error)))
+                try:
+                    if sh is not None:
+                        sh.close()
+                except Exception as e:
+                    traceback.print_exc()
             finally:
                 os.chdir(old_cwd)
 

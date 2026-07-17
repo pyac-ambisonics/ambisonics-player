@@ -46,7 +46,7 @@ class SphericalHarmonics:
     """
 
     # Constructor
-    def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1, preprocess='MagLS'):
+    def __init__(self, hrtf: HRTF = None, sampling_rate=44_100, ambi_order=1, preprocess='MagLS'):
         """Initialize spherical-harmonic HRTF processing.
 
         Parameters
@@ -75,11 +75,8 @@ class SphericalHarmonics:
             self.hrtf = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
-        if self.hrtf.hrirs.sampling_rate != sampling_rate:
-            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, 
-                                              sampling_rate=sampling_rate, 
-                                              match_amplitude='freq'
-                                              )
+        if self.hrtf.fs != sampling_rate:
+            self.hrtf.resample(sampling_rate)
 
         # store the sources in a Sampling Sphere
         self.sources = sh.SamplingSphere.from_coordinates(self.hrtf.sources)
