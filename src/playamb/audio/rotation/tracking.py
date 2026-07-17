@@ -17,13 +17,20 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Orientation:
-    """Snapshot of a head pose in degrees. Immutable data class.
+    """
+    Snapshot of a head pose in degrees. Angles are saved in the (yaw, pitch, roll) format,
+    and follow the sign conventions of a right-handed coordinate system.
 
-    Attributes:
-        yaw: Rotation around the vertical axis.
-        pitch: Rotation around the side-to-side axis.
-        roll: Rotation around the forward axis.
-        source: Origin of the measurement, can be `off`, `demo` or `hardware`.
+    Attributes
+    ----------
+        yaw: float, optional
+            Rotation around the vertical axis. The default is 0.
+        pitch: float, optional
+            Rotation around the side-to-side axis. The default is 0.
+        roll: float, optional
+            Rotation around the forward axis. The default is 0.
+        source: string, optional
+            Origin of the measurement, can be `'off'`, `'demo'` or `'hardware'`. The default is `'off'`
     """
 
     yaw: float = 0.0
@@ -34,13 +41,19 @@ class Orientation:
 
 class OrientationState:
     """Thread-safe storage for the latest head orientation."""
-
     def __init__(self):
         self._lock = threading.Lock()
         self._orientation = Orientation()
 
     def set(self, yaw=0.0, pitch=0.0, roll=0.0, source="manual"):
-        """Store a new orientation and return it as an Orientation() instance."""
+        """
+        Store a new orientation and return it as an Orientation() instance.
+        
+        Returns
+        -------
+        orientation : `':py:class:~playamb.audio.rotation.tracking.Orientation'`
+            Orientation object containing the current orientation.
+        """
 
         orientation = Orientation(float(yaw), float(pitch), float(roll), source)
         with self._lock:
@@ -48,7 +61,13 @@ class OrientationState:
         return orientation
 
     def get(self):
-        """Return the most recent orientation snapshot."""
+        """Return the most recent orientation snapshot.
+        
+        Returns
+        -------
+        orientation : `':py:class:~playamb.audio.rotation.tracking.Orientation'`
+            Orientation object containing the orientation that has just been set.
+        """
 
         with self._lock:
             return self._orientation
