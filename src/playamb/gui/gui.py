@@ -708,7 +708,7 @@ class AudioPlayerGUI:
         self.block_size_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.headphone_box.configure(state="readonly" if enabled else tk.DISABLED)
         self.hrtf_button.configure(state=tk.NORMAL if enabled else tk.DISABLED)
-        self.hp_sample_size_box.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+        self.hp_sample_size_box.configure(state="readonly" if enabled else tk.DISABLED)
 
     def _normalize_hrtf_path(self, path):
         if path in (None, "", "Default FABIAN HRTF"):
