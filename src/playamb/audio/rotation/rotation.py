@@ -4,7 +4,8 @@ and hardswapped to make the rotation faster and make realtime computation achiev
 """
 
 import numpy as np
-import shroom.utils.rotation_utils as rot_utils
+# import shroom.utils.rotation_utils as rot_utils
+from spharpy.transforms import wigner_d_function
 from pathlib import Path
 
 from playamb.utils.utils import resolve_path
@@ -36,19 +37,9 @@ class RotationMatrix:
         f = p / file
 
         # load the small d dictionary
-        self.small_d = self._load_small_d(resolve_path(f))
-
-        # build all unitary transofrmation matrices as well as their Hermitian transpose for query later
-        self.unitary = {}
-        self.unitary_H = {}
-        for order in range(8):
-            self.unitary[order] = self.build_complex_to_real_transform(order)
-            # conjugate transpose -> Hermitian transpose
-            self.unitary_H[order] = self.unitary[order].conj().T
-
-
+        self.small_d = self._load_small_d_npz(resolve_path(f))
     
-    def _load_small_d(self, file: Path):
+    def _load_small_d_npz(self, file: Path):
         """
         Load a .npz file containing precalculated wigner small-d matrices.
 
@@ -66,11 +57,14 @@ class RotationMatrix:
         """
         # load file
         loaded = np.load(file=file)
+        self.betas_rad = loaded['betas_rad']
 
         # convert NpzFile to Dictionary
         d = {}
         for order in loaded.keys():
-            d[int(order)] = loaded[order]
+            # ignore the betas key
+            if order != 'betas_rad':
+                d[int(order)] = loaded[order]
 
         # close file
         loaded.close()
@@ -95,129 +89,72 @@ class RotationMatrix:
             real Wigner-D matrix of shape ((N+1)^2, (N+1)^2).
             Block diagonal structure with blocks of size (2n+1)x(2n+1).
         """
-        # Compute the complex matrix 
-        D_complex = self.wigner_d_matrix(N, alpha, beta, gamma) 
-        
-        # Transform to the real SH basis
-        # D_real = U @ D_complex @ U^H
-        D_real = self.unitary[N] @ D_complex @ self.unitary_H[N]
-        
-        # Clean up numerical artifacts (should be purely real)
-        return np.real(D_real)
+        total = (N + 1) ** 2
+        D_real = np.zeros((total, total), dtype=np.float64)
 
-    def wigner_d_matrix(self, N: int, alpha: float, beta: float, gamma: float):
-        """
-        Compute the Wigner-D matrix for Spherical Harmonics rotation.
-        This implementation is taken from @Yhonatangayers implementation
-        in the pyshroom package. It has been adapted for use with precalculated
-        small_d matrices as per the terms of the MIT Licence, which the pyshroom
-        package is licensed under.
+        for l in range(N + 1):
+            # shape (2l+1, 2l+1)
+            d_l = self._query_small_d(l, -beta)
+            # m indices
+            m_vals = np.arange(-l, l + 1) 
 
+            # Create meshgrid: rows = m', cols = m
+            # (size, 1)
+            m_row = m_vals[:, None]
+            # (1, size)
+            m_col = m_vals[None, :]
 
-        The matrix D rotates SH coefficients such that:
-        f_rot(omega) = f(R^-1 omega)
-        c_rot = D(R) @ c
+            # Compute Phi(m, alpha) and Phi(m', gamma) for all m, m'
+            Phi_m_alpha = self._phi(m_col, alpha)
+            Phi_md_gamma = self._phi(m_row, gamma)
+            Phi_neg_m_alpha = self._phi(-m_col, alpha)
+            Phi_neg_md_gamma = self._phi(-m_row, gamma)
 
-        Parameters
-        ----------
-        N : int
-            Maximum SH order.
-        alpha, beta, gamma : float
-            Euler angles in radians (Z-Y-Z convention).
-            Rotation R = Rz(alpha) * Ry(beta) * Rz(gamma).
+            # Absolute values for indices
+            md_abs = np.abs(m_row)
+            m_abs = np.abs(m_col)
 
-        Returns
-        -------
-        D : np.ndarray
-            Wigner-D matrix of shape ((N+1)^2, (N+1)^2).
-            Block diagonal structure with blocks of size (2n+1)x(2n+1).
-        """
-        # Total number of coefficients
-        L = (N + 1) ** 2
-        D = np.zeros((L, L), dtype=np.complex128)
+            # Access small-d entries using index = value + l
+            # d(l, |m|, |m'|, beta)
+            d1 = d_l[md_abs + l, m_abs + l]
+            # d(l, -|m'|, |m|, beta)
+            d2 = d_l[m_abs + l, -md_abs + l]
 
-        # Compute for each order n
-        for n in range(N + 1):
-            # Get the small-d matrix for this order
-            d_n = self._query_small_d(n, beta)
+            # Signs and parity
+            sign_m = np.where(m_col < 0, -1, 1)
+            sign_md = np.where(m_row < 0, -1, 1)
+            # (-1)^m
+            parity_m = np.where(m_col % 2 == 0, 1, -1)
 
-            # Construct the full D matrix for this order
-            # D^n_{m',m} = e^{-i m' alpha} * d^n_{m',m}(beta) * e^{-i m gamma}
+            # Blanco formula (adapted to +beta)
+            term1 = d1 + parity_m * d2
+            term2 = d1 - parity_m * d2
 
-            m_range = np.arange(-n, n + 1)
+            R_l = 0.5 * ( sign_md * Phi_m_alpha * Phi_md_gamma * term1
+                        - sign_m  * Phi_neg_m_alpha * Phi_neg_md_gamma * term2 )
 
-            # Phase terms
-            # exp(-i * m' * alpha)  [rows]
-            phase_left = np.exp(-1j * m_range * alpha)
+            # Imaginary parts should cancel; take real part to clean up
+            R_l_real = np.real(R_l)
 
-            # exp(-i * m * gamma)   [cols]
-            phase_right = np.exp(-1j * m_range * gamma)
+            # Place block into global matrix (order: l=0,1,2,...)
+            start = l ** 2
+            end = (l + 1) ** 2
+            D_real[start:end, start:end] = R_l_real
 
-            # Combine: D = diag(phase_left) @ d @ diag(phase_right)
-            # Broadcasting: (2n+1, 1) * (2n+1, 2n+1) * (1, 2n+1)
-            D_n = phase_left[:, np.newaxis] * d_n * phase_right[np.newaxis, :]
-
-            # Place in the big matrix
-            start_idx = n**2
-            end_idx = (n + 1) ** 2
-            D[start_idx:end_idx, start_idx:end_idx] = D_n
-
-        return D
-
-    def build_complex_to_real_transform(self, N: int) -> np.ndarray:
-        """
-        Build the unitary transformation matrix U that maps complex SH coefficients
-        (ordered -n,...,n) to real SH coefficients (ordered -n,...,n).
-
-        For a given order n and degree m > 0:
-            Y_real^{+m} = 1/sqrt(2) * (Y^{-m} + (-1)^m Y^m)
-            Y_real^{-m} = i/sqrt(2) * (Y^{-m} - (-1)^m Y^m)
-            Y_real^{0}   = Y^0
-
-        Returns
-        -------
-        U : np.ndarray
-            Shape ((N+1)^2, (N+1)^2), complex unitary.
-            c_real = U @ c_complex
-        """
-        L = (N + 1) ** 2
-        U = np.zeros((L, L), dtype=np.complex128)
-
-        # tracks the starting index for each order block (0, 1, 4, 9, ...)
-        index = 0  
-        for n in range(N + 1):
-            block_size = 2 * n + 1
-            U_block = np.zeros((block_size, block_size), dtype=np.complex128)
-            
-            for m in range(-n, n + 1):
-                # column index in the complex block (0 to 2n)
-                column = m + n
-                
-                if m == 0:
-                    # row index for m=0 in the real block (center)
-                    row = n
-                    U_block[row, column] = 1.0
-                elif m > 0:
-                    # Map complex Y^{-m} (col idx c_minus) and Y^{m} (col idx c_plus)
-                    c_minus = (-m) + n
-                    c_plus = m + n
-                    
-                    # Real Y^{+m}
-                    r_plus = n + m
-                    factor = 1.0 / np.sqrt(2.0)
-                    U_block[r_plus, c_minus] = factor
-                    U_block[r_plus, c_plus] = factor * ((-1) ** m)
-                    
-                    # Real Y^{-m}
-                    r_minus = n - m
-                    U_block[r_minus, c_minus] = 1j * factor
-                    U_block[r_minus, c_plus] = -1j * factor * ((-1) ** m)
-            
-            # Place the block into the full matrix
-            U[index:index + block_size, index:index + block_size] = U_block
-            index += block_size
-        
-        return U
+        return D_real
+    
+    # Helper: Phi(m, angle) as defined in spharpy
+    # possible to precompute!!!
+    def _phi(self, m, angle):
+        # vectorized version for 1D arrays
+        out = np.zeros_like(m, dtype=np.float64)
+        mask_pos = m > 0
+        mask_zero = m == 0
+        mask_neg = m < 0
+        out[mask_pos] = np.sqrt(2) * np.cos(m[mask_pos] * angle)
+        out[mask_zero] = 1.0
+        out[mask_neg] = -np.sqrt(2) * np.sin(-m[mask_neg] * angle)
+        return out
 
     def _query_small_d(self, N: int, beta: float) -> np.ndarray:
         """
@@ -239,20 +176,18 @@ class RotationMatrix:
         # local copy of the small_d matrix corresponding to this order
         sd = self.small_d[N]
 
-        # Extract the keys (shape (N,))
-        keys = sd[:, 0, 0]
         # Binary search for insertion point
-        pos = keys.searchsorted(beta)
+        pos = self.betas_rad.searchsorted(beta)
 
         # take care of the edge cases
-        n = len(keys)
+        n = len(self.betas_rad)
         if pos == 0:
             return sd[pos]
         if pos == n:
             return sd[n - 1]
 
         # Compare distances to left and right neighbours and return index of the closest
-        if beta - keys[pos - 1] <= keys[pos] - beta:
+        if beta - self.betas_rad[pos - 1] <= self.betas_rad[pos] - beta:
             return sd[pos - 1]
         else:
             return sd[pos]
@@ -276,12 +211,13 @@ class RotationMatrix:
         # step can never be smaller than 1 degree
         if step < 0.1:
             step = 0.1
-        angles = np.arange(0, 360.1, step)
+        angles = np.arange(-180, 180.1, step)
         angles_rad = np.deg2rad(angles)
         length = len(angles)
 
         # dictionary that stores key-value pair (order-small_d)
         results = {}
+        results['betas_rad'] = angles_rad
 
         for order in range(sh_order+1):
             # size of small D matrix
@@ -290,7 +226,13 @@ class RotationMatrix:
             d = np.empty((length, dim, dim), dtype=np.float64)
 
             for i, beta in enumerate(angles_rad):
-                d[i] = rot_utils._wigner_small_d(order, beta)
+                #d[i] = rot_utils.wigner_d_function(order, beta)
+
+                m_vals = np.arange(-order, order+1)
+                #d = np.zeros((dim, dim))
+                for j, m_dash in enumerate(m_vals):
+                    for k, m in enumerate(m_vals):
+                        d[i, j, k] = wigner_d_function(order, m_dash, m, beta)
 
             results[str(order)] = d
 
