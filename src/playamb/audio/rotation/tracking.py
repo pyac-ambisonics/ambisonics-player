@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Orientation:
-    """Snapshot of a head pose in degrees.
+    """Snapshot of a head pose in degrees. Immutable data class.
 
     Attributes:
         yaw: Rotation around the vertical axis.

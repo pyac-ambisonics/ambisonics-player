@@ -7,6 +7,7 @@ from pathlib import Path
 from queue import Queue
 from tkinter import filedialog, messagebox
 from tkinter import ttk
+from dataclasses import replace
 
 from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.player import AudioPlayer
@@ -98,7 +99,8 @@ class AudioPlayerGUI:
         self.set_controls_enabled(False)
         self.root.after(100, self._process_backend_load_queue)
         self.root.after(250, self.update_gui_loop)
-        self.root.after(50, self.update_head_tracking_loop)
+        # 10 ms for maximum headtracker update rate (100 Hz)
+        self.root.after(10, self.update_head_tracking_loop)
 
     # ==============================================================
     # Styling
@@ -141,6 +143,13 @@ class AudioPlayerGUI:
             foreground="#1f1f1f",
             font=("Consolas", 12, "bold"),
         )
+        style.configure(
+            "White.TCheckbutton",
+            background="white",
+            foreground="#000000",
+            font=("Arial", 10),
+        )
+
         style.configure("TButton", font=("Arial", 10), padding=6)
         style.configure("Accent.TButton", font=("Arial", 10, "bold"), padding=6)
 
@@ -185,7 +194,7 @@ class AudioPlayerGUI:
             main,
             text="AmbiX file selection, binaural SH-HRTF decoding, and transport control",
             style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(2, 18))
+        ).pack(anchor="w", pady=(2, 10))
 
         self.create_input_card(main)
         self.create_playback_card(main)
@@ -232,13 +241,13 @@ class AudioPlayerGUI:
             self.scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def create_input_card(self, parent):
-        card = ttk.Frame(parent, style="Card.TFrame", padding=18)
-        card.pack(fill=tk.X, pady=(0, 14))
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(card, text="Input", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         self.playback_status_label = ttk.Label(card, textvariable=self.playback_status, style="SmallInfo.TLabel")
         self.playback_status_label.grid(
-            row=0, column=1, sticky="e", padx=(16, 0)
+            row=0, column=1, sticky="e", padx=(10, 0)
         )
 
         self.ambix_button = ttk.Button(
@@ -269,32 +278,33 @@ class AudioPlayerGUI:
         card.columnconfigure(1, weight=1)
 
     def create_playback_card(self, parent):
-        card = ttk.Frame(parent, style="Card.TFrame", padding=18)
-        card.pack(fill=tk.X, pady=(0, 14))
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(card, text="Playback Control", style="Section.TLabel").grid(
             row=0, column=0, columnspan=5, sticky="w"
         )
 
         self.play_button = ttk.Button(card, text="Play / Resume", command=self.play)
-        self.play_button.grid(row=1, column=0, padx=(0, 8), pady=(16, 12))
+        self.play_button.grid(row=1, column=0, padx=(0, 8), pady=(10, 10))
 
         self.pause_button = ttk.Button(card, text="Pause", command=self.pause)
-        self.pause_button.grid(row=1, column=1, padx=8, pady=(16, 12))
+        self.pause_button.grid(row=1, column=1, padx=8, pady=(10, 10))
 
         self.stop_button = ttk.Button(card, text="Stop", command=self.stop)
-        self.stop_button.grid(row=1, column=2, padx=8, pady=(16, 12))
+        self.stop_button.grid(row=1, column=2, padx=8, pady=(10, 10))
 
         self.loop_check = ttk.Checkbutton(
             card,
             text="Loop",
             variable=self.loop_value,
             command=self.set_loop,
+            style="White.TCheckbutton"
         )
-        self.loop_check.grid(row=1, column=3, padx=18, pady=(16, 12))
+        self.loop_check.grid(row=1, column=3, padx=18, pady=(10, 10))
 
         ttk.Label(card, textvariable=self.time_text, style="Time.TLabel").grid(
-            row=1, column=4, sticky="e", pady=(16, 12)
+            row=1, column=4, sticky="e", pady=(10, 10)
         )
 
         self.progress_slider = ttk.Scale(
@@ -314,14 +324,14 @@ class AudioPlayerGUI:
             text="Start Offset (s)",
             background="white",
             font=("Arial", 10, "bold"),
-        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
         self.offset_entry = ttk.Entry(card, textvariable=self.offset_value, width=12)
-        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(16, 0))
+        self.offset_entry.grid(row=3, column=1, sticky="w", padx=(14, 0), pady=(10, 0))
         self.offset_button = ttk.Button(card, text="Set Offset", command=self.set_offset)
-        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.offset_button.grid(row=3, column=2, sticky="w", padx=(12, 0), pady=(10, 0))
         
         ttk.Label(card, text="Volume", background="white", font=("Arial", 10, "bold")).grid(
-            row=4, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(10, 0)
         )
         self.volume_slider = ttk.Scale(
             card,
@@ -331,7 +341,7 @@ class AudioPlayerGUI:
             variable=self.volume_value,
             command=self.set_volume,
         )
-        self.volume_slider.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.volume_slider.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(10, 0))
         self.volume_display = ttk.Label(
             card,
             textvariable=self.volume_display_value,
@@ -339,23 +349,23 @@ class AudioPlayerGUI:
             width=6,
             font=("Consolas", 10),
         )
-        self.volume_display.grid(row=4, column=4, sticky="w", pady=(16, 0))
+        self.volume_display.grid(row=4, column=4, sticky="w", pady=(10, 0))
 
         card.columnconfigure(4, weight=1)
 
     def create_decoder_settings_card(self, parent):
-        card = ttk.Frame(parent, style="Card.TFrame", padding=18)
-        card.pack(fill=tk.X, pady=(0, 14))
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(card, text="Decoder Settings", style="Section.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(card, textvariable=self.decoder_note, style="SmallInfo.TLabel").grid(
-            row=0, column=2, columnspan=4, sticky="e", padx=(16, 0)
+            row=0, column=2, columnspan=4, sticky="e", padx=(10, 0)
         )
 
         ttk.Label(card, text="Order", background="white", font=("Arial", 10, "bold")).grid(
-            row=1, column=0, sticky="w", pady=(16, 0)
+            row=1, column=0, sticky="w", pady=(10, 0)
         )
         self.order_box = ttk.Combobox(
             card,
@@ -364,10 +374,10 @@ class AudioPlayerGUI:
             state="readonly",
             width=10,
         )
-        self.order_box.grid(row=1, column=1, sticky="w", padx=(14, 18), pady=(16, 0))
+        self.order_box.grid(row=1, column=1, sticky="w", padx=(14, 18), pady=(10, 0))
 
         ttk.Label(card, text="Buffer Size", background="white", font=("Arial", 10, "bold")).grid(
-            row=1, column=2, sticky="w", pady=(16, 0)
+            row=1, column=2, sticky="w", pady=(10, 0)
         )
         self.block_size_box = ttk.Combobox(
             card,
@@ -376,14 +386,14 @@ class AudioPlayerGUI:
             state="readonly",
             width=10,
         )
-        self.block_size_box.grid(row=1, column=3, sticky="w", padx=(14, 18), pady=(16, 0))
+        self.block_size_box.grid(row=1, column=3, sticky="w", padx=(14, 18), pady=(10, 0))
 
         ttk.Label(
             card,
             text="Headphone Filter",
             background="white",
             font=("Arial", 10, "bold"),
-        ).grid(row=3, column=0, sticky="w", pady=(16, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
         self.headphone_box = ttk.Combobox(
             card,
             textvariable=self.headphone_value,
@@ -391,10 +401,10 @@ class AudioPlayerGUI:
             state="readonly",
             width=36,
         )
-        self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0))
+        self.headphone_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(10, 0))
 
         ttk.Label(card, text="HP Samples", background="white", font=("Arial", 10, "bold")).grid(
-            row=3, column=4, sticky="w", pady=(16, 0)
+            row=3, column=4, sticky="w", pady=(10, 0)
         )
         self.filter_size_box = ttk.Combobox(
             card,
@@ -403,7 +413,7 @@ class AudioPlayerGUI:
             state="readonly",
             width=10,
         )
-        self.filter_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(16, 0))
+        self.filter_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(10, 0))
 
         # make it so we don't accidentally scroll in comboboxes
         # Windows / macOS
@@ -424,16 +434,16 @@ class AudioPlayerGUI:
         # create
 
         ttk.Label(card, text="HRTF SOFA", background="white", font=("Arial", 10, "bold")).grid(
-            row=4, column=0, sticky="w", pady=(16, 0)
+            row=4, column=0, sticky="w", pady=(10, 0)
         )
         ttk.Label(card, textvariable=self.hrtf_path_value, background="white").grid(
-            row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(16, 0)
+            row=4, column=1, columnspan=3, sticky="ew", padx=(14, 18), pady=(10, 0)
         )
         self.hrtf_button = ttk.Button(card, text="Browse", command=self.select_hrtf_file)
-        self.hrtf_button.grid(row=4, column=4, sticky="w", pady=(16, 0))
+        self.hrtf_button.grid(row=4, column=4, sticky="w", pady=(10, 0))
 
         self.apply_settings_button = ttk.Button(card, text="Apply Settings", command=self.apply_decoder_settings)
-        self.apply_settings_button.grid(row=4, column=5, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.apply_settings_button.grid(row=4, column=5, sticky="w", padx=(12, 0), pady=(10, 0))
         self.apply_settings_button.configure(state=tk.DISABLED)
 
         ttk.Label(card, textvariable=self.loaded_settings_text, style="SmallInfo.TLabel").grid(
@@ -443,14 +453,14 @@ class AudioPlayerGUI:
         card.columnconfigure(3, weight=1)
 
     def create_rotation_card(self, parent):
-        card = ttk.Frame(parent, style="Card.TFrame", padding=18)
-        card.pack(fill=tk.X, pady=(0, 14))
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(card, text="Rotation / Head Tracking", style="Section.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(card, textvariable=self.rotation_note, style="SmallInfo.TLabel").grid(
-            row=0, column=3, columnspan=4, sticky="e", padx=(16, 0)
+            row=0, column=3, columnspan=4, sticky="e", padx=(10, 0)
         )
 
         self.yaw_slider = self.create_rotation_slider(card, "Yaw Z", self.yaw_value, 1)
@@ -458,20 +468,21 @@ class AudioPlayerGUI:
         self.roll_slider = self.create_rotation_slider(card, "Roll X", self.roll_value, 3)
 
         # self.rotation_button = ttk.Button(card, text="Apply Rotation", command=self.apply_rotation)
-        # self.rotation_button.grid(row=4, column=0, sticky="w", pady=(16, 0))
+        # self.rotation_button.grid(row=4, column=0, sticky="w", pady=(10, 0))
 
         self.reset_rotation_button = ttk.Button(card, text="Reset Rotation", command=self.reset_rotation)
-        self.reset_rotation_button.grid(row=4, column=0, sticky="w", padx=(12, 0), pady=(16, 0))
+        self.reset_rotation_button.grid(row=4, column=0, sticky="w", padx=(12, 0), pady=(10, 0))
 
         # add options to enable or disable yaw-pitch-roll
         # Create a container frame for the checkboxes
-        checkbox_frame = ttk.Frame(card)
-        checkbox_frame.grid(row=4, column=1, columnspan=3, sticky="w", padx=16, pady=(16, 12))
+        checkbox_frame = ttk.Frame(card, style="Card.TFrame")
+        checkbox_frame.grid(row=4, column=1, columnspan=3, sticky="w", padx=16, pady=(10, 12))
         self.yaw_check = ttk.Checkbutton(
             checkbox_frame,
             text="Enable Yaw",
             variable=self.yaw_check_val,
             command=self.enable_yaw,
+            style="White.TCheckbutton"
         )
         self.yaw_check.pack(side=tk.LEFT, padx=(0, 10))
         self.pitch_check = ttk.Checkbutton(
@@ -479,6 +490,7 @@ class AudioPlayerGUI:
             text="Enable Pitch",
             variable=self.pitch_check_val,
             command=self.enable_pitch,
+            style="White.TCheckbutton"
         )
         self.pitch_check.pack(side=tk.LEFT, padx=(0, 10))
         self.roll_check = ttk.Checkbutton(
@@ -486,13 +498,9 @@ class AudioPlayerGUI:
             text="Enable Roll",
             variable=self.roll_check_val,
             command=self.enable_roll,
+            style="White.TCheckbutton"
         )
         self.roll_check.pack(side=tk.LEFT, padx=(0, 10))
-
-        # set yaw, pitch, roll enabled or disabled
-        self.enable_yaw()
-        self.enable_pitch()
-        self.enable_roll()
 
         #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
         #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
@@ -503,7 +511,7 @@ class AudioPlayerGUI:
         # )
 
         ttk.Label(card, text="Tracking", background="white", font=("Arial", 10, "bold")).grid(
-            row=5, column=0, sticky="w", pady=(16, 0)
+            row=5, column=0, sticky="w", pady=(10, 0)
         )
         self.tracking_mode_box = ttk.Combobox(
             card,
@@ -512,10 +520,10 @@ class AudioPlayerGUI:
             state="readonly",
             width=10,
         )
-        self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(16, 0))
+        self.tracking_mode_box.grid(row=5, column=1, sticky="w", padx=(14, 12), pady=(10, 0))
 
         ttk.Label(card, text="Head tracker cable on:\n(Restart tracking to apply changes)", background="white", font=("Arial", 10)).grid(
-            row=5, column=2, sticky="w", pady=(16, 0)
+            row=5, column=2, sticky="w", pady=(10, 0)
         )
 
         self.chirality_box = ttk.Combobox(
@@ -525,23 +533,23 @@ class AudioPlayerGUI:
             state="disabled",
             width=5,
         )
-        self.chirality_box.grid(row=5, column=3, sticky="w", padx=(14, 12), pady=(16, 0))
+        self.chirality_box.grid(row=5, column=3, sticky="w", padx=(14, 12), pady=(10, 0))
 
         self.refresh_tracker_button = ttk.Button(
             card,
             text="Refresh Devices",
             command=self.refresh_hardware_tracking_status,
         )
-        self.refresh_tracker_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.refresh_tracker_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(10, 0))
 
         self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", state="disabled", command=self.head_tracker.zero)
-        self.zero_tracker_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.zero_tracker_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(10, 0))
 
         self.start_stop_tracking_button = ttk.Button(card, text="Start Tracking", state="disabled", command=self.start_stop_callback)
-        self.start_stop_tracking_button.grid(row=5, column=6, sticky="w", padx=(0, 8), pady=(16, 0))
+        self.start_stop_tracking_button.grid(row=5, column=6, sticky="w", padx=(0, 8), pady=(10, 0))
 
         #self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
-        #self.stop_tracking_button.grid(row=5, column=7, sticky="w", padx=(0, 8), pady=(16, 0))
+        #self.stop_tracking_button.grid(row=5, column=7, sticky="w", padx=(0, 8), pady=(10, 0))
         #self.stop_tracking_button["state"] = "disabled"
 
         self.tracking_canvas = tk.Canvas(
@@ -552,14 +560,14 @@ class AudioPlayerGUI:
             highlightthickness=1,
             highlightbackground="#d8d8d8",
         )
-        self.tracking_canvas.grid(row=1, column=5, rowspan=4, columnspan=2, sticky="w", pady=(14, 0))
+        self.tracking_canvas.grid(row=1, column=5, rowspan=4, columnspan=2, sticky="w", pady=(10, 0))
 
         ttk.Label(card, textvariable=self.tracking_status, style="SmallInfo.TLabel").grid(
-            row=6, column=0, columnspan=2, sticky="w", padx=(0, 0), pady=(14, 0)
+            row=6, column=0, columnspan=2, sticky="w", padx=(0, 0), pady=(10, 0)
         )
 
         ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
-            row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(14, 0)
+            row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(10, 0)
         )
 
         self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(True))
@@ -568,6 +576,11 @@ class AudioPlayerGUI:
         self._visualizer = Visual3D("resources/virtualhead.obj", self.tracking_canvas, 
                                position=[int(self.tracking_canvas['width'])/2, int(self.tracking_canvas['height'])/2-10]
                             )
+
+        # set yaw, pitch, roll enabled or disabled. callö these only after the visualizer has been instantiated
+        self.enable_yaw()
+        self.enable_pitch()
+        self.enable_roll()
 
         card.columnconfigure(1, weight=1)
         card.columnconfigure(2, weight=0)
@@ -1388,9 +1401,12 @@ class AudioPlayerGUI:
         try:
             if enabled:
                 # enable sliders
-                self.yaw_slider.configure(state=tk.NORMAL)
-                self.pitch_slider.configure(state=tk.NORMAL)
-                self.roll_slider.configure(state=tk.NORMAL)
+                if self.yaw_check_val.get():
+                    self.yaw_slider.configure(state=tk.NORMAL)
+                if self.pitch_check_val.get():
+                    self.pitch_slider.configure(state=tk.NORMAL)
+                if self.roll_check_val.get():
+                    self.roll_slider.configure(state=tk.NORMAL)
             else:
                 # disable sliders
                 self.yaw_slider.configure(state=tk.DISABLED)
@@ -1401,18 +1417,24 @@ class AudioPlayerGUI:
 
 
     def apply_rotation(self):
+        # find correct ypr
+        yaw = pitch = roll = 0.0
+        if self.yaw_check_val.get():
+            yaw = float(self.yaw_value.get())
+        if self.pitch_check_val.get():
+            pitch = float(self.pitch_value.get())
+        if self.roll_check_val.get():
+            roll = float(self.roll_value.get())
+        orientation = self.orientation_state.set(yaw, pitch, roll, source="manual")
+
+        # update gui
+        self.update_rotation_label()
+        self.draw_head_tracking_visualizer(orientation)
+
         if not self.has_loaded_player():
             return
 
         try:
-            yaw = pitch = roll = 0.0
-            if self.yaw_check_val.get():
-                yaw = float(self.yaw_value.get())
-            if self.pitch_check_val.get():
-                pitch = float(self.pitch_value.get())
-            if self.roll_check_val.get():
-                roll = float(self.roll_value.get())
-            orientation = self.orientation_state.set(yaw, pitch, roll, source="manual")
             self.apply_orientation_to_audio(orientation)
             self.update_rotation_label()
             self.draw_head_tracking_visualizer(orientation)
@@ -1514,19 +1536,30 @@ class AudioPlayerGUI:
     def update_head_tracking_loop(self):
         if self.rotation_tracker.is_running():
             orientation = self.rotation_tracker.orientation_state.get()
+
+            # Build kwargs for the fields that need zeroing
+            updates = {}
             if not self.yaw_check_val.get():
-                orientation.yaw = 0.0
+                updates['yaw'] = 0.0
             if not self.pitch_check_val.get():
-                orientation.pitch = 0.0
+                updates['pitch'] = 0.0
             if not self.roll_check_val.get():
-                orientation.roll = 0.0
+                updates['roll'] = 0.0
+            
+            # replace orientation if update is needed
+            if updates:
+                orientation = replace(orientation, **updates)
+
+            # push audio updates as fast as possible before doing anything else
+            self.apply_orientation_to_audio(orientation)
+
+            # set slider values
             self.yaw_value.set(orientation.yaw)
             self.pitch_value.set(orientation.pitch)
             self.roll_value.set(orientation.roll)
 
             self.update_rotation_label()
             self.draw_head_tracking_visualizer(orientation)
-            self.apply_orientation_to_audio(orientation)
         # 10 ms refresh rate allows to get all the orientation data even when the head tracker works at maximum rate (100 Hz)
         self.root.after(10, self.update_head_tracking_loop)
 
