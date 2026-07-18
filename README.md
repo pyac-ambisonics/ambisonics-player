@@ -151,6 +151,19 @@ player.close()
 Note: `import playamb` also imports the GUI module, so `tkinter` must be
 available (it ships with the standard CPython installer).
 
+### Runnable examples
+
+Self-contained example scripts live in `examples/` (run from the repository
+root after `pip install -e .`):
+
+```powershell
+python examples\make_test_signal.py test_ambix.wav                # synthesize test material
+python examples\render_to_binaural.py test_ambix.wav out.wav --headphone "Sennheiser HD650"
+python examples\playback_demo.py test_ambix.wav --duration 10
+```
+
+Each script has `--help` describing all options.
+
 ## Head Tracking Status
 
 The current code does not implement full hardware head tracking. The GUI includes:
