@@ -118,8 +118,10 @@ class SphericalHarmonics:
         # create SH rotation unit
         self.rotation = RotationMatrix()
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
-        self.hrir_nm_rot = None
-        self._D = None
+        self.hrir_nm_rot = {}
+        self.hrir_nm_rot['new'] = None
+        self._D = {}
+        self._D['new'] = np.eye(ambi_order)
         self._last_rotation = Rotation.from_euler('zyx', (0, 0, 0))
         self.atol = np.deg2rad(1)
 
@@ -127,6 +129,7 @@ class SphericalHarmonics:
         self._rotation_queue = queue.Queue(maxsize=1)
         self._rotation_update = threading.Event()
         self._stop_rotation_thread = threading.Event()
+        self._rotation_cf_needed = False
 
         # start the rotation thread
         self._rotation_thread = threading.Thread(
@@ -236,8 +239,11 @@ class SphericalHarmonics:
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
         new_rot = new_D @ self.hrir_nm_fft
         with self._rotation_lock:
-            self._D = new_D
-            self.hrir_nm_rot = new_rot
+            self._D['old'] = self._D['new']
+            self._D['new'] = new_D
+            self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+            self.hrir_nm_rot['new'] = new_rot
+            self._rotation_cf_needed = True
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -305,8 +311,11 @@ class SphericalHarmonics:
             # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
             new_rot = new_D @ self.hrir_nm_fft
             with self._rotation_lock:
-                self._D = new_D
-                self.hrir_nm_rot = new_rot
+                self._D['old'] = self._D['new']
+                self._D['new'] = new_D
+                self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+                self.hrir_nm_rot['new'] = new_rot
+                self._rotation_cf_needed = True
                 
 
     def get_rotation_matrix(self):
@@ -338,7 +347,8 @@ class SphericalHarmonics:
         # if D is None, do nothing and keep our latest rotated hrir_nm
         if D is not None:
             # using the fft, since we expect this to be faster than time domain
-            self.hrir_nm_rot = D @ self.hrir_nm_fft
+            self.hrir_nm_rot['old'] = D['old'] @ self.hrir_nm_fft
+            self.hrir_nm_rot['new'] = D['new'] @ self.hrir_nm_fft
     
     # apply the hrtf data to an ambisonics file
     def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
@@ -466,10 +476,31 @@ class SphericalHarmonics:
         n_samples, *_ = fft_ambi.shape
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
 
-        for ear in range(2):
-            # perform convolution in rotated frequency domain and sum in frequency domain
-            with self._rotation_lock:
-                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
+        if self._rotation_cf_needed:
+            fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
+            for ear in range(2):
+                # perform convolution in rotated frequency domain and sum in frequency domain
+                with self._rotation_lock:
+                        # get old and new rotation resluts
+                        fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+                        fft_sum_old[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['old'][ear, :, :], axis=0)
+            
+                        # generate ramp
+                        K = block_size // 16
+                        ramp = self.hanning_ramp(K)
+
+                        # do crossfade
+                        # Output [n] = (1 - w[n]) * old_signal[n] + w[n] * new_signal[n] for n = 0 to K-1.
+                        # For n = K to n_samples - 1, output new_signal[n] directly.
+                        fft_sum[ear, :K] = (1.0 - ramp[:K, None]) * fft_sum_old[ear,:K] + ramp[:K, None] * fft_sum[ear, :K]
+
+                        self._rotation_cf_needed = False
+        else:
+            for ear in range(2):
+                # perform convolution in rotated frequency domain and sum in frequency domain
+                with self._rotation_lock:
+                        fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+            
         
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
@@ -480,6 +511,21 @@ class SphericalHarmonics:
         # transpose, since sounddevice expects shape (n_samples, n_channels)
         return sum_conv.T
     
+    def hanning_ramp(K: int) -> np.ndarray:
+        """
+        Hanning (raised cosine) ramp from 0 to 1.
+        Smooth derivatives at both ends – best for avoiding clicks.
+
+        Parameters:
+        -----------
+        K : int
+            the length of the ramp
+        """
+        if K <= 1:
+            return np.ones(K, dtype=np.float64)
+        i = np.arange(K, dtype=np.float64)
+        return 0.5 * (1.0 - np.cos(i * np.pi / (K - 1)))
+
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
     # with ambisonics audio
     def update_hrirs_fft(self, block_size: int):
