@@ -490,9 +490,7 @@ class SphericalHarmonics:
                         ramp = self.hanning_ramp(K)
 
                         # do crossfade
-                        # Output [n] = (1 - w[n]) * old_signal[n] + w[n] * new_signal[n] for n = 0 to K-1.
-                        # For n = K to n_samples - 1, output new_signal[n] directly.
-                        fft_sum[ear, :K] = (1.0 - ramp[:K, None]) * fft_sum_old[ear,:K] + ramp[:K, None] * fft_sum[ear, :K]
+                        fft_sum[ear, :K] = (1.0 - ramp) * fft_sum_old[ear,:K] + ramp * fft_sum[ear, :K]
 
                         self._rotation_cf_needed = False
         else:
@@ -511,7 +509,7 @@ class SphericalHarmonics:
         # transpose, since sounddevice expects shape (n_samples, n_channels)
         return sum_conv.T
     
-    def hanning_ramp(K: int) -> np.ndarray:
+    def hanning_ramp(self, K: int) -> np.ndarray:
         """
         Hanning (raised cosine) ramp from 0 to 1.
         Smooth derivatives at both ends – best for avoiding clicks.
