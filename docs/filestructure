@@ -1,0 +1,35 @@
+.
+└── src
+    ├── playamb
+        ├── audio
+        │   ├── data
+        │   ├── __init__.py
+        │   ├── ambifile.py
+        │   ├── engine
+        │   │   ├── __init__.py
+        │   │   ├── hrtf.py
+        │   │   ├── player.py
+        │   │   └── spherical.py
+        │   ├── rotation
+        │   │   ├── __init__.py
+        │   │   ├── rotation.py
+        │   │   └── tracking.py
+        ├── gui
+        │   ├── __init__.py
+        │   ├── gui.py
+        │   └── visualizer.py
+        └── utils
+            ├── __init__.py
+            ├── utils.py
+            ├── resources
+            └── run_playamb_gui.py
+├── tests
+│   ├── amb_order_tests.py
+│   └── validate_magls.ipynb
+├── docs
+    └── Empty for now
+├── old_tests
+    └── Empty for now
+├── LICENSE
+├── README.md
+└── requirements.txt

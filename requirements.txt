@@ -7,6 +7,5 @@ spharpy
 pooch
 pyshroom
 python-osc
-pyheadtracker
 mido
-python-rtmidi
+pyheadtracker

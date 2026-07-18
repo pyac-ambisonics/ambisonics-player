@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "playamb"
+version = "0.1.0"
+description = "Ambisonics player: AmbiX loading, binaural HRTF decoding, and playback with optional GUI and head tracking"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Kylan Klein Lenderink" },
+    { name = "Giovanni Zebele" },
+    { name = "Peiwen Xie" },
+    { name = "Leihan Zhang" },
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "sounddevice",
+    "soundfile",
+    "pyfar",
+    "spharpy",
+    "pooch",
+    "pyshroom",
+    "mido",
+    "pyheadtracker",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["playamb*"]

@@ -27,17 +27,21 @@ Python GUI prototype for loading AmbiX Ambisonics WAV files, decoding them to bi
 
 ```text
 ambisonics-player/
-  resources/                  headphone compensation filters
-  ambisonics_file_English.py   AmbiX WAV loading, validation, streaming, seeking
-  audio_player.py              streaming playback, transport controls, overlap-add
-  gui_player_v2_new.py         current GUI
-  head_tracking.py             orientation state, demo tracker, OSC tracker skeleton
-  hrtf.py                      HRTF loading and preprocessing
-  main.py                      application entry point
-  requirements.txt             Python dependencies
-  spherical.py                 spherical-harmonic HRTF decoding and rotation hook
-  utils.py                     channel/order and FFT helper functions
-  mido
+  pyproject.toml               packaging metadata (makes playamb pip-installable)
+  requirements.txt             plain dependency list (alternative to pyproject)
+  src/
+    run_playamb_gui.py         GUI application entry point
+    resources/                 HRTF data, headphone filters, rotation matrices
+    playamb/                   installable Python package
+      audio/data/ambifile.py   AmbiX WAV loading, validation, streaming, seeking
+      audio/engine/player.py   streaming playback, transport controls, overlap-add
+      audio/engine/hrtf.py     HRTF loading, preprocessing, headphone filters
+      audio/engine/spherical.py  spherical-harmonic binaural decoding, rotation hook
+      audio/rotation/          rotation matrices, orientation state, tracker skeleton
+      gui/                     Tkinter GUI and head-direction visualizer
+      utils/utils.py           channel/order and FFT helper functions
+  tests/                       order/filter rendering tests, MagLS validation notebook
+  docs/                        generated API documentation
 ```
 
 ## Setup
@@ -67,20 +71,86 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
 ```
 
-Install dependencies:
+Install the project (this pulls in all dependencies and makes the `playamb`
+package importable):
 
 ```powershell
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
+
+If you encounter an error relative to the installation of ```python-rtmidi``` upon excecuting the last command, you need to install Microsoft Visual C++ 14.x. You can download the installer from here: https://visualstudio.microsoft.com/de/downloads/?q=build+tools. Once done, run ```pip install -r requirements.txt``` again.
 
 ## Run
 
 ```powershell
-python main.py
+python src\run_playamb_gui.py
 ```
 
 The GUI will open. Choose the Ambisonics order, block size, HRTF/headphone settings, then click `Load AmbiX File`.
+
+## Using playamb as a Library (GUI Bypass)
+
+All decoding functionality lives in the `playamb` package and can be used from
+any other Python project or script without starting the GUI.
+
+### Install into your environment
+
+From the environment of your own project, install this repository in editable
+mode (editable mode is currently required: the bundled HRTF and headphone data
+in `src/resources` is resolved relative to the source tree):
+
+```powershell
+python -m pip install -e C:\path\to\ambisonics-player
+```
+
+After that, `import playamb` works from any directory.
+
+### Example 1 — offline rendering to a binaural WAV (no audio device needed)
+
+```python
+import soundfile as sf
+from playamb import AmbisonicsFile, HRTF, SphericalHarmonics
+
+ambi = AmbisonicsFile("scene_ambix.wav")    # order auto-detected from channel count
+hrtf = HRTF()                               # default FABIAN HRTF
+hrtf.load_hp_filter("Sennheiser HD650")     # optional headphone compensation
+sh = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi.get_samplerate(),
+                        ambi_order=ambi.order, preprocess="MagLS")
+
+stereo = sh.apply_hrtf(ambi.get_signal_chunk(0, ambi.total_frames)).T
+sf.write("scene_binaural.wav", stereo, ambi.get_samplerate())
+```
+
+### Example 2 — real-time playback with transport control
+
+```python
+from playamb import AmbisonicsFile, HRTF, SphericalHarmonics, AudioPlayer
+
+ambi = AmbisonicsFile("scene_ambix.wav", chunk_size=2048)
+sh = SphericalHarmonics(hrtf=HRTF(), sampling_rate=ambi.get_samplerate(),
+                        ambi_order=ambi.order, preprocess="MagLS")
+
+player = AudioPlayer(ambi, sh)
+player.play()               # non-blocking
+# ... player.pause() / player.resume() / player.seek_to(seconds)
+# ... player.set_volume(0.5) / player.set_loop(True)
+player.stop()
+player.close()
+```
+
+### Key parameters
+
+| Parameter    | Where                | Meaning                                                          |
+|--------------|----------------------|------------------------------------------------------------------|
+| `chunk_size` | `AmbisonicsFile`     | samples per streaming block (32-8192, rounded to a power of two) |
+| `order`      | `AmbisonicsFile`     | Ambisonics order; `None` = auto-detect from channel count        |
+| `path`       | `HRTF`               | custom SOFA file path; `None` = bundled FABIAN HRTF              |
+| `preprocess` | `SphericalHarmonics` | `"MagLS"` (falls back to `"LS"` if `shroom` is unavailable)      |
+| `gain`       | `AudioPlayer`        | initial playback gain in `[0.0, 1.0]`                            |
+
+Note: `import playamb` also imports the GUI module, so `tkinter` must be
+available (it ships with the standard CPython installer).
 
 ## Head Tracking Status
 

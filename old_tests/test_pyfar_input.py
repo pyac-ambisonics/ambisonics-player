@@ -1,6 +1,6 @@
 import numpy as np
 import pyfar as pf
-from audio_player import AudioPlayer
+from src.audio.engine.audio_player import AudioPlayer
 
 
 def main():
