@@ -62,7 +62,7 @@ class AudioPlayerGUI:
 
         # Decoder settings
         self.order_value = tk.StringVar(value="Auto")
-        self.block_size_value = tk.StringVar(value="1024")
+        self.block_size_value = tk.StringVar(value="256")
         self.hrtf_path_value = tk.StringVar(value="Default FABIAN HRTF")
         self.headphone_value = tk.StringVar(value="Diffuse Field Equalization")
         self.hp_sample_value = tk.StringVar(value="512")
@@ -940,7 +940,7 @@ class AudioPlayerGUI:
                 traceback.print_exc()
                 self._backend_load_queue.put(("error", str(error)))
                 try:
-                    if sh is not None:
+                    if 'sh' in locals():
                         sh.close()
                 except Exception as e:
                     traceback.print_exc()
@@ -1416,11 +1416,13 @@ class AudioPlayerGUI:
                     self.pitch_slider.configure(state=tk.NORMAL)
                 if self.roll_check_val.get():
                     self.roll_slider.configure(state=tk.NORMAL)
+                self.reset_rotation_button.configure(state=tk.NORMAL)
             else:
                 # disable sliders
                 self.yaw_slider.configure(state=tk.DISABLED)
                 self.pitch_slider.configure(state=tk.DISABLED)
                 self.roll_slider.configure(state=tk.DISABLED)
+                self.reset_rotation_button.configure(state=tk.DISABLED)
         except Exception as error:
             self._handle_error("Error", error)
 
