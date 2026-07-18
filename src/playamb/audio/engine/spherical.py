@@ -481,18 +481,18 @@ class SphericalHarmonics:
             for ear in range(2):
                 # perform convolution in rotated frequency domain and sum in frequency domain
                 with self._rotation_lock:
-                        # get old and new rotation resluts
-                        fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
-                        fft_sum_old[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['old'][ear, :, :], axis=0)
-            
-                        # generate ramp
-                        K = block_size // 16
-                        ramp = self.hanning_ramp(K)
+                    # get old and new rotation resluts
+                    fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+                    fft_sum_old[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['old'][ear, :, :], axis=0)
+        
+                    # generate ramp
+                    K = block_size // 16
+                    ramp = self.hanning_ramp(K)
 
-                        # do crossfade
-                        fft_sum[ear, :K] = (1.0 - ramp) * fft_sum_old[ear,:K] + ramp * fft_sum[ear, :K]
+                    # do crossfade
+                    fft_sum[ear, :K] = (1.0 - ramp) * fft_sum_old[ear,:K] + ramp * fft_sum[ear, :K]
 
-                        self._rotation_cf_needed = False
+                    self._rotation_cf_needed = False
         else:
             for ear in range(2):
                 # perform convolution in rotated frequency domain and sum in frequency domain
