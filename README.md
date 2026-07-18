@@ -109,8 +109,7 @@ After that, `import playamb` works from any directory.
 ### Example 1 — offline rendering to a binaural WAV (no audio device needed)
 
 ```python
-import soundfile as sf
-from playamb import AmbisonicsFile, HRTF, SphericalHarmonics
+from playamb import AmbisonicsFile, HRTF, SphericalHarmonics, render_to_binaural_file
 
 ambi = AmbisonicsFile("scene_ambix.wav")    # order auto-detected from channel count
 hrtf = HRTF()                               # default FABIAN HRTF
@@ -118,8 +117,8 @@ hrtf.load_hp_filter("Sennheiser HD650")     # optional headphone compensation
 sh = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi.get_samplerate(),
                         ambi_order=ambi.order, preprocess="MagLS")
 
-stereo = sh.apply_hrtf(ambi.get_signal_chunk(0, ambi.total_frames)).T
-sf.write("scene_binaural.wav", stereo, ambi.get_samplerate())
+# streams chunk-by-chunk: memory stays 0(chunk) even for hours-long files
+render_to_binaural_file(ambi, sh, "scene_binaural.wav")
 ```
 
 ### Example 2 — real-time playback with transport control
