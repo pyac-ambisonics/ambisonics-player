@@ -43,9 +43,7 @@ def main() -> None:
         preprocess=args.preprocess,
     )
     player = AudioPlayer(ambi, sh)
-    # AudioPlayer.__init__ leaves is_loaded False (only the load_* methods
-    # set it), so play()/get_duration() would silently no-op without this.
-    player.set_loaded(True)
+
 
     try:
         player.set_volume(args.volume)
