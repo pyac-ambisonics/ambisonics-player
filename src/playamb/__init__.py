@@ -8,6 +8,7 @@ from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.player import AudioPlayer
 from playamb.audio.engine.hrtf import HRTF, Processing
 from playamb.audio.engine.spherical import SphericalHarmonics
+from playamb.audio.engine.render import render_to_binaural_file
 from playamb.audio.rotation.tracking import Orientation, OrientationState, DemoHeadTracker, HeadTracker
 from playamb.audio.rotation.rotation import RotationMatrix
 from playamb.gui.gui import AudioPlayerGUI
