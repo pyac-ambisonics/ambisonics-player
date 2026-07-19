@@ -52,6 +52,7 @@ def main() -> None:
         sampling_rate=ambi.get_samplerate(),
         ambi_order=ambi.order,
         preprocess=args.preprocess,
+        block_size=ambi.get_chunk_size()
     )
 
     def progress(frames_done: int, total_frames: int) -> None:

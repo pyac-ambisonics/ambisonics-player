@@ -48,8 +48,9 @@ class SphericalHarmonics:
     """
 
     # Constructor
-    def __init__(self, hrtf: HRTF = None, sampling_rate=44_100, ambi_order=1, preprocess='MagLS'):
-        """Initialize spherical-harmonic HRTF processing.
+    def __init__(self, hrtf: HRTF = None, sampling_rate=44_100, ambi_order=1, preprocess='MagLS', block_size=None):
+        """Initialize spherical-harmonic HRTF processing. 
+        This blocks and will take a considerable time to finish processing.
 
         Parameters
         -----------
@@ -61,6 +62,8 @@ class SphericalHarmonics:
             Ambisonic order used for the spherical-harmonic decomposition.
         prepocess : str, optional
             Preprocessing algorithm to use on HRTF. Currently LS and MagLS are implemented. MagLS is default
+        block_size : int, optional
+            This sets the block size of the audio blocks we expect to process. Necessary for correct OLA performance!
         """
         start = time.time()
         
@@ -135,7 +138,6 @@ class SphericalHarmonics:
         self._rotation_queue = queue.Queue(maxsize=1)
         self._rotation_update = threading.Event()
         self._stop_rotation_thread = threading.Event()
-        self._rotation_cf_needed = False
 
         # start the rotation thread
         self._rotation_thread = threading.Thread(
@@ -147,15 +149,31 @@ class SphericalHarmonics:
         # use this function because we will not calculate D otherwise
         self.update_rotation_matrix([0, 0, 0])
 
-        # prepare pre_gain for gianstaging
-        self.pre_gain = 0.1
+        # States for overlap-add (must be reset on seek)
+        self.overlap_buffer = None 
+        self.overlap_buffer_old = None 
+        # overlap add L = self.get_IR_length()
+        if block_size is None:
+            block_size = next_power_of_two(self.get_IR_length())
+        self.block_size = block_size
+        # overlap add N
+        # compute N >= M + L - 1
+        self.N = next_power_of_two(self.get_IR_length() + block_size - 1)
 
         # prepare ramp for crossfading between rotations
-        self.cf_length = 32
-        self.ramp = hanning_ramp(self.cf_length)
+        self._cf_length = 32
+        self._ramp = hanning_ramp(self._cf_length, 2)
+        self._cf_flag = False
+
+        # prepare pre_gain for gianstaging
+        self.pre_gain = 0.1
         print(f"Setting up Spherical Harmonics took {time.time() - start:.2f}s")
 
     def update_order(self, order: int, block_size=None):
+        """
+        Updates the order of the Spherical Harmonics object. Recalculates a bunch of the internal variables. 
+        This call blocks and will take a considerable time to finish processing.
+        """
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = order
         self.sh_definition = sh.SphericalHarmonicDefinition(self.ambi_order, 
@@ -184,8 +202,30 @@ class SphericalHarmonics:
         # prepare hrir_nm_fft
         if block_size is None:
             block_size = next_power_of_two(self.get_IR_length())
-        self.update_hrirs_fft(block_size)
+        # this calls update_hrirs_fft internally!
+        self.update_process_variables(block_size)
         
+    
+    def update_process_variables(self, block_size: int):
+        """
+        Updated the variables necessary to perform successfull Overlap-Add algorithm on processing.
+
+        Parameters
+        ----------
+        block_size : int
+            The buffer size we are currently working with
+        """
+        self.block_size = block_size
+        # compute N >= M + L - 1
+        self.N = next_power_of_two(self.get_IR_length() + block_size - 1)
+
+        # update our sh fft coefficients once (and on each rotation update)
+        self.update_hrirs_fft(self.N)
+
+        # allocate buffers
+        self.overlap_buffer = np.zeros((self.get_IR_length() - 1, 2), dtype=np.float32)
+        self.overlap_buffer_old = np.zeros_like(self.overlap_buffer)
+
     def get_IR_length(self):
         """
         Return the impulse-response length (number of samples) of the current HRIRs.
@@ -253,7 +293,6 @@ class SphericalHarmonics:
             self._D['new'] = new_D
             self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
             self.hrir_nm_rot['new'] = new_rot
-            self._rotation_cf_needed = True
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -273,7 +312,7 @@ class SphericalHarmonics:
             try:
                 # drop the last cached block. queue should be empty now, since we only have size 1
                 self._rotation_queue.get_nowait()
-                print("Queue is already full! Dropping this")
+                print("Queue is already full! Dropping this rotation update")
             except queue.Empty:
                 pass
             # try putting a new block into the queue again after draining it
@@ -325,7 +364,8 @@ class SphericalHarmonics:
                 self._D['new'] = new_D
                 self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
                 self.hrir_nm_rot['new'] = new_rot
-                self._rotation_cf_needed = True
+                # a crossfade needs to happen now!
+                self._cf_flag = True
                 
 
     def get_rotation_matrix(self):
@@ -517,9 +557,10 @@ class SphericalHarmonics:
 
         Returns
         -------
-        numpy.ndarray, numpy.ndarray
+        numpy.ndarray, numpy.ndarray, bool
             2x Stereo time-domain array (n_samples, 2) after convolution and gain staging.
-            once for old rotation, once for new rotation
+            once for old rotation, once for new rotation.
+            If a crossfade is required, bool will be True
 
         Notes
         -------------
@@ -544,31 +585,101 @@ class SphericalHarmonics:
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
         fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
 
+        # snapshot the filters under lock
+        with self._rotation_lock:
+            hrir_new = self.hrir_nm_rot['new'].copy()
+            hrir_old = self.hrir_nm_rot['old'].copy()
+            do_fade = self._cf_flag
+            # Consume the flag so it doesn't fire again on the next block
+            self._cf_flag = False
+
         for ear in range(2):
             # perform convolution in rotated frequency domain and sum in frequency domain
             # get old and new rotation resluts
-            with self._rotation_lock:
-                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
-                fft_sum_old[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['old'][ear, :, :], axis=0)
-
-                # release the rotation flag
-                self._rotation_cf_needed = False
-
-        # set this so when no rotation happens, new and old are the same and we don't carry the old rotation over
-        self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+            fft_sum[ear] = np.sum(fft_ambi.T * hrir_new[ear, :, :], axis=0)
+            fft_sum_old[ear] = np.sum(fft_ambi.T * hrir_old[ear, :, :], axis=0)
 
         sum_conv = np.fft.ifft(fft_sum).real
         sum_conv_old = np.fft.ifft(fft_sum_old).real
-
-        # # do crossfade
-        # sum_conv[ear, :self.cf_length] = (1.0 - self.ramp) * sum_conv_old[ear,:self.cf_length] + self.ramp * sum_conv[ear, :self.cf_length]
 
         # do gain staging
         sum_conv *= self.pre_gain
         sum_conv_old *= self.pre_gain
         # no test for clipping because of time
         # transpose, since sounddevice expects shape (n_samples, n_channels)
-        return sum_conv.T, sum_conv_old.T
+        return sum_conv.T, sum_conv_old.T, do_fade
+
+    # process a single chunk of data, performing an overlap-add algorithm
+    def process_ola(self, chunk: np.ndarray):
+        """
+        Process a single Ambisonics chunk with overlap-add.
+        This method should maintains `self.overlap_buffer` and updates it.
+        """
+        # update our block size and sh_length
+        block_size, *_ = chunk.shape
+        sh_length = self.get_IR_length()
+
+        # apply hrtf
+        stereo = self.apply_hrtf_chunk(chunk, self.N)
+
+        # add overlap to stereo output
+        stereo[:sh_length-1] += self.overlap_buffer
+
+        # save new overlap buffer
+        self.overlap_buffer[:] = stereo[block_size:block_size + sh_length - 1]
+    
+        return stereo[:block_size]
+
+    def process_ola_rot(self, chunk: np.ndarray):
+        """
+        Process a single Ambisonics chunk with overlap-add. and crossfading between old and new stereo input and overlap-add buffer
+        This method maintains `self.overlap_buffer` and `self.overlap_buffer_old`and updates them.
+        """
+
+        # update our block size and sh_length
+        block_size, *_ = chunk.shape
+        sh_length = self.get_IR_length()
+
+        # apply hrtf
+        stereo_new, stereo_old, do_fade = self.apply_hrtf_chunk_rot(chunk, self.N)
+
+        # take care of our overlap-adds before crossfading
+        stereo_new[:sh_length-1] += self.overlap_buffer       # only new filter's tail
+        stereo_old[:sh_length-1] += self.overlap_buffer_old   # only old filter's tail
+
+        # extract tails for the next block
+        tail_new = stereo_new[block_size:block_size + sh_length - 1].copy()
+        tail_old = stereo_old[block_size:block_size + sh_length - 1].copy()
+
+        if do_fade:
+            # do crossfade
+            output = stereo_new.copy()
+            output[:self._cf_length] = (1.0 - self._ramp) * stereo_old[:self._cf_length] + \
+                                               self._ramp * stereo_new[:self._cf_length]
+            
+            # crossfade our tails!
+            # new tail is the currently incoming block!
+            tail_output = tail_new.copy()
+            # cf between the two. so we add the overlap buffer (one update behind) to the new tail (currently incoming block)
+            tail_output[:self._cf_length] = (1.0 - self._ramp) * tail_old[:self._cf_length] + \
+                                                    self._ramp * tail_new[:self._cf_length]
+
+            # After the fade, we have fully transitioned to the new filter.
+            # Unify both states to the crossfaded tail so the OLA stays coherent.
+            self.overlap_buffer[:]     = tail_output
+            self.overlap_buffer_old[:] = tail_output
+        else: 
+            # No rotation – both filters are identical; just use the new one.
+            output = conv_new
+            self.overlap_buffer[:]     = tail_new
+            self.overlap_buffer_old[:] = tail_new
+                
+        return output[:block_size]
+        
+
+    def flush(self) -> np.ndarray:
+        """Return the final M-1 tail samples after the last chunk."""
+        return self.overlap_buffer.copy()
 
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
     # with ambisonics audio

@@ -59,16 +59,6 @@ class AudioPlayer:
         self.seek_target = 0.0
         self.loop = False
 
-        # States for overlap-add (must be reset on seek)
-        self.overlap_buffer = None 
-        self.overlap_buffer_old = None 
-        # overlap add L
-        self.sh_length = None
-        # overlap add M. needs to be updated if chunk_size gets updated
-        self.block_size = ambi_file.get_chunk_size()
-        # overlap add N
-        self.N = None
-
         # keeping track of blocks
         self.current_block = None
         self.current_block_pos = 0
@@ -78,32 +68,6 @@ class AudioPlayer:
         self.stream = None
         # construction received a valid, validated source: ready to play
         self.is_loaded = True
-        
-        # prepare ramp for crossfading between rotations
-        self.cf_length = 128
-        self.ramp = hanning_ramp(self.cf_length, 2)
-
-
-    # reset all variables in case of seek or stop
-    def _reset_process_variables(self):
-        # Reset the file reader to beginning
-        #self.ambi_file.reset_position()
-
-        # reset internal state 
-        # current impulse response length M
-        self.sh_length = self.sh.get_IR_length()
-        # block size L
-        self.block_size = self.ambi_file.get_chunk_size()
-
-        # compute N >= M + L - 1
-        self.N = next_power_of_two(self.sh_length + self.block_size - 1)
-
-        # update our sh fft coefficients once (and on each rotation update)
-        self.sh.update_hrirs_fft(self.N)
-
-        # allocate buffers
-        self.overlap_buffer = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
-        self.overlap_buffer_old = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
 
     def _put_stop_aware(self, item) -> bool:
         """
@@ -139,7 +103,7 @@ class AudioPlayer:
                 self.current_block_pos = 0
                 self._clear_audio_queue()
                 self.ambi_file.seek_to_time(self.seek_target)
-                self._reset_process_variables()
+                self.sh.update_process_variables(self.ambi_file.get_chunk_size())
                 #continue to enxt loop iteration
                 continue
 
@@ -162,7 +126,7 @@ class AudioPlayer:
             
             # processes one chunk and return a stereo block, 
             # updating the overlap buffer internally.
-            processed_block = self._process_chunk_cf(chunk)
+            processed_block = self.sh.process_ola_rot(chunk)
 
             # # Put into queue (waits instead of dropping; aborts on stop)
             # if not self._put_stop_aware(processed_block):
@@ -177,16 +141,15 @@ class AudioPlayer:
                     # if not we print a warning
                     print("Warning!!! Queue is full! Dropping this block")
 
-            # at end of file add the overlap buffer a final time
+            # at end of file flush any remaining output from SH-overlap-buffer
             if end_of_file:
-                # add the remaining overlapp buffer to the queue
-                if not self._put_stop_aware(self.overlap_buffer.copy()):
+                if not self._put_stop_aware(self.sh.flush()):
                     break
 
                 #check for looping
                 if self.loop:
                     # resets processor and will read chunk 0 next
-                    self._reset_process_variables()
+                    self.sh.update_process_variables(self.ambi_file.get_chunk_size())
                     self.ambi_file.reset_position()
                 else:
                     # queue None-item as flag that playback has ended
@@ -194,54 +157,6 @@ class AudioPlayer:
                         break
                     # clear the play event
                     self.play_event.clear()
-
-    # process a single chunk of data, performing an overlap-add algorithm
-    def _process_chunk(self, chunk):
-        """
-        Process a single Ambisonics chunk with overlap-add.
-        This method should maintains `self.overlap_buffer` and updates it.
-        """
-        
-        # update our block size
-        # using self.blocksize instead. but this may lead to problem? check
-        block_size, *_ = chunk.shape
-
-        # apply hrtf
-        stereo = self.sh.apply_hrtf_chunk(chunk, self.N)
-
-        # add overlap to stereo output
-        stereo[:self.sh_length-1] += self.overlap_buffer
-
-        # save new overlap buffer
-        self.overlap_buffer[:] = stereo[block_size:block_size + self.sh_length - 1]
-    
-        return stereo[:block_size]
-    
-    # process a single chunk of data, performing an overlap-add algorithm
-    def _process_chunk_cf(self, chunk):
-        """
-        Process a single Ambisonics chunk with overlap-add. and crossfading between old and new stereo input and overlap-add buffer
-        This method should maintains `self.overlap_buffer` and `self.overlap_buffer_old`and updates them.
-        """
-        
-        # update our block size
-        block_size, *_ = chunk.shape
-
-        # apply hrtf
-        stereo, stereo_old = self.sh.apply_hrtf_chunk_rot(chunk, self.N)
-
-        # add overlap to stereo output
-        stereo[:self.sh_length-1]     += self.overlap_buffer
-        stereo_old[:self.sh_length-1] += self.overlap_buffer_old
-
-        # save new overlap buffer
-        self.overlap_buffer[:]     =     stereo[block_size:block_size + self.sh_length - 1]
-        self.overlap_buffer_old[:] = stereo_old[block_size:block_size + self.sh_length - 1]
-
-        stereo[:self.cf_length] = (1.0 - self.ramp) * stereo_old[:self.cf_length] + \
-                                          self.ramp * stereo[:self.cf_length]
-    
-        return stereo[:block_size]
 
     def load_audio(self, audio, sample_rate, source_name="Audio array"):
         """
@@ -390,7 +305,7 @@ class AudioPlayer:
 
         # reset all processing variables before starting the processing thread. 
         # also ensures block size is calculated before we initialize the stream
-        self._reset_process_variables()
+        self.sh.update_process_variables(self.ambi_file.get_chunk_size())
 
         # Start processing thread
         self.processing_thread = threading.Thread(target=self._process_loop)
@@ -524,7 +439,7 @@ class AudioPlayer:
         
         # in case we are not already streaming/processing data just update internal state
         if self.stream is None or self.processing_thread is None:
-            self._reset_process_variables()
+            self.sh.update_process_variables(self.ambi_file.get_chunk_size())
             self.ambi_file.seek_to_time(seconds)
             self._clear_audio_queue()
             self.position = int(seconds * self.fs)
@@ -553,7 +468,7 @@ class AudioPlayer:
 
         # in case we are not already streaming/processing data just update internal state
         if self.stream is None or self.processing_thread is None:
-            self._reset_process_variables()
+            self.sh.update_process_variables(self.ambi_file.get_chunk_size())
             self.ambi_file.seek_to_time(seconds)
             self._clear_audio_queue()
             self.position = int(seconds * self.fs)

@@ -920,6 +920,7 @@ class AudioPlayerGUI:
                         hrtf=hrtf,
                         sampling_rate=ambix.get_samplerate(),
                         ambi_order=ambix.get_order(),
+                        block_size=ambix.get_chunk_size()
                     )
                     self._decoder_cache[cache_key] = (hrtf, sh)
                     print("Decoder settings changed — building HRTF and SH coefficients.")
@@ -1263,7 +1264,7 @@ class AudioPlayerGUI:
             return
 
         try:
-            self.player.set_volume(volume**(1 + 3 * volume))
+            self.player.set_volume(volume**(1 + 2 * volume))
             self.update_info()
         except Exception as error:
             self._handle_error("Error", error)

@@ -28,68 +28,68 @@ in ``AudioPlayer._reset_process_variables`` / ``_process_chunk``
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-import numpy as np
+# import numpy as np
 import soundfile as sf
 
 from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.spherical import SphericalHarmonics
-from playamb.utils.utils import next_power_of_two
+# from playamb.utils.utils import next_power_of_two
 
 
-class OverlapAddProcessor:
-    """
-    Chunk-wise binaural decoder with overlap-add state.
+# class OverlapAddProcessor:
+#     """
+#     Chunk-wise binaural decoder with overlap-add state.
 
-    Ported from ``AudioPlayer._reset_process_variables`` (buffer setup) and
-    ``AudioPlayer._process_chunk`` (per-block overlap-add) so the offline
-    path stays numerically identical to real-time playback.
+#     Ported from ``AudioPlayer._reset_process_variables`` (buffer setup) and
+#     ``AudioPlayer._process_chunk`` (per-block overlap-add) so the offline
+#     path stays numerically identical to real-time playback.
 
-    Notes
-    -----
-    Constructing this processor calls ``sh.update_hrirs_fft(N)``, which
-    overwrites the FFT cache shared with any ``AudioPlayer`` using the same
-    ``SphericalHarmonics`` instance.  Do not render while that player is
-    actively playing (a subsequent ``play()`` resets its own state and is
-    unaffected).
-    """
+#     Notes
+#     -----
+#     Constructing this processor calls ``sh.update_hrirs_fft(N)``, which
+#     overwrites the FFT cache shared with any ``AudioPlayer`` using the same
+#     ``SphericalHarmonics`` instance.  Do not render while that player is
+#     actively playing (a subsequent ``play()`` resets its own state and is
+#     unaffected).
+#     """
 
-    def __init__(self, sh: SphericalHarmonics, chunk_size: int):
-        self.sh = sh
-        # impulse response length M
-        self.ir_length = sh.get_IR_length()
-        # FFT length N >= M + L - 1 (circular == linear condition)
-        self.fft_size = next_power_of_two(self.ir_length + chunk_size - 1)
-        sh.update_hrirs_fft(self.fft_size)
-        # carry buffer for the M-1 tail samples of each block
-        self.overlap_buffer = np.zeros((self.ir_length - 1, 2), dtype=np.float32)
+#     def __init__(self, sh: SphericalHarmonics, chunk_size: int):
+#         self.sh = sh
+#         # impulse response length M
+#         self.ir_length = sh.get_IR_length()
+#         # FFT length N >= M + L - 1 (circular == linear condition)
+#         self.fft_size = next_power_of_two(self.ir_length + chunk_size - 1)
+#         sh.update_hrirs_fft(self.fft_size)
+#         # carry buffer for the M-1 tail samples of each block
+#         self.overlap_buffer = np.zeros((self.ir_length - 1, 2), dtype=np.float32)
 
-    def process(self, chunk: np.ndarray) -> np.ndarray:
-        """
-        Decode one Ambisonics chunk and return its clean stereo samples.
+#     def process(self, chunk: np.ndarray) -> np.ndarray:
+#         """
+#         Decode one Ambisonics chunk and return its clean stereo samples.
 
-        Parameters
-        ----------
-        chunk : np.ndarray
-            Ambisonics block, shape ``(block_size, n_channels)``.  Only the
-            last chunk of a stream may be shorter than the nominal size.
+#         Parameters
+#         ----------
+#         chunk : np.ndarray
+#             Ambisonics block, shape ``(block_size, n_channels)``.  Only the
+#             last chunk of a stream may be shorter than the nominal size.
 
-        Returns
-        -------
-        np.ndarray
-            Stereo block of shape ``(block_size, 2)``.  The convolution
-            tail is kept in the internal overlap buffer.
-        """
-        block_size = chunk.shape[0]
-        stereo = self.sh.apply_hrtf_chunk(chunk, self.fft_size)
-        # add the tail carried over from the previous block
-        stereo[: self.ir_length - 1] += self.overlap_buffer
-        # save the new tail for the next block
-        self.overlap_buffer[:] = stereo[block_size : block_size + self.ir_length - 1]
-        return stereo[:block_size]
+#         Returns
+#         -------
+#         np.ndarray
+#             Stereo block of shape ``(block_size, 2)``.  The convolution
+#             tail is kept in the internal overlap buffer.
+#         """
+#         block_size = chunk.shape[0]
+#         stereo = self.sh.apply_hrtf_chunk(chunk, self.fft_size)
+#         # add the tail carried over from the previous block
+#         stereo[: self.ir_length - 1] += self.overlap_buffer
+#         # save the new tail for the next block
+#         self.overlap_buffer[:] = stereo[block_size : block_size + self.ir_length - 1]
+#         return stereo[:block_size]
 
-    def flush(self) -> np.ndarray:
-        """Return the final M-1 tail samples after the last chunk."""
-        return self.overlap_buffer.copy()
+#     def flush(self) -> np.ndarray:
+#         """Return the final M-1 tail samples after the last chunk."""
+#         return self.overlap_buffer.copy()
 
 
 def render_to_binaural_file(
@@ -156,7 +156,6 @@ def render_to_binaural_file(
 
     try:
         ambi_file.reset_position()
-        ola = OverlapAddProcessor(sh, ambi_file.get_chunk_size())
 
         with sf.SoundFile(
             str(out_path),
@@ -173,7 +172,7 @@ def render_to_binaural_file(
                     # empty file: nothing was convolved, so there is no tail
                     break
 
-                block = ola.process(chunk)
+                block = sh.process_ola(chunk)
                 if gain != 1.0:
                     block = block * gain
                 out.write(block)
@@ -185,7 +184,7 @@ def render_to_binaural_file(
 
                 if end_of_file:
                     # flush the final convolution tail (matches mode='full')
-                    tail = ola.flush()
+                    tail = sh.flush()
                     if gain != 1.0:
                         tail = tail * gain
                     out.write(tail)

@@ -9,6 +9,7 @@ from playamb.audio.engine.hrtf import HRTF
 from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.audio.engine.render import render_to_binaural_file
 
+block_size = 2048
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -23,6 +24,7 @@ def sh_first_order():
         sampling_rate=48000,
         ambi_order=1,
         preprocess="LS",
+        block_size=block_size     # because we use  
     )
     yield sh
     if hasattr(sh, "close"):
@@ -50,13 +52,13 @@ class TestRenderToBinauralFile:
     ):
         """Chunked output must be numerically equivalent to apply_hrtf."""
         # -- full-file reference --------------------------------------------------
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         full_signal = ambi.get_signal_chunk(0, ambi.total_frames)
         full = sh_first_order.apply_hrtf(full_signal).T  # (frames, 2)
 
         # -- chunked render -------------------------------------------------------
         out = tmp_path / "chunked.wav"
-        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         render_to_binaural_file(ambi2, sh_first_order, str(out))
 
         chunked, _ = sf.read(str(out), dtype="float64")
@@ -77,11 +79,11 @@ class TestRenderToBinauralFile:
         self, synthetic_ambix_path, sh_first_order, tmp_path,
     ):
         """gain=0.5 output equals exactly half of the gain=1.0 output."""
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         ref_out = tmp_path / "gain_ref.wav"
         render_to_binaural_file(ambi, sh_first_order, str(ref_out))
 
-        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         half_out = tmp_path / "gain_half.wav"
         render_to_binaural_file(ambi2, sh_first_order, str(half_out), gain=0.5)
 
@@ -95,7 +97,7 @@ class TestRenderToBinauralFile:
     def test_output_wav_metadata(self, synthetic_ambix_path, sh_first_order, tmp_path):
         """Output WAV: stereo, 48 kHz, correct length, FLOAT subtype."""
         ir_len = sh_first_order.get_IR_length()
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
 
         out = tmp_path / "meta.wav"
         render_to_binaural_file(ambi, sh_first_order, str(out))
@@ -109,7 +111,7 @@ class TestRenderToBinauralFile:
         assert info.subtype == "FLOAT"
 
         # Second render with PCM_16
-        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         out2 = tmp_path / "meta_pcm16.wav"
         render_to_binaural_file(ambi2, sh_first_order, str(out2), subtype="PCM_16")
         assert sf.info(str(out2)).subtype == "PCM_16"
@@ -121,12 +123,12 @@ class TestRenderToBinauralFile:
         small_path = tmp_path / "small.wav"
         sf.write(str(small_path), data, 48000, subtype="FLOAT")
 
-        ambi = AmbisonicsFile(str(small_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(small_path), chunk_size=block_size)
         full_signal = ambi.get_signal_chunk(0, ambi.total_frames)
         full = sh_first_order.apply_hrtf(full_signal).T
 
         out = tmp_path / "small_out.wav"
-        ambi2 = AmbisonicsFile(str(small_path), chunk_size=2048)
+        ambi2 = AmbisonicsFile(str(small_path), chunk_size=block_size)
         render_to_binaural_file(ambi2, sh_first_order, str(out))
 
         chunked, _ = sf.read(str(out), dtype="float64")
@@ -142,7 +144,7 @@ class TestRenderToBinauralFile:
         sf.write(str(empty_path), np.zeros((0, 4), np.float32), 48000,
                  subtype="FLOAT")
 
-        ambi = AmbisonicsFile(str(empty_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(empty_path), chunk_size=block_size)
         out = tmp_path / "empty_out.wav"
         result = render_to_binaural_file(ambi, sh_first_order, str(out))
 
@@ -155,7 +157,7 @@ class TestRenderToBinauralFile:
         self, synthetic_ambix_path, sh_first_order, tmp_path,
     ):
         """Read position saved on entry, restored on exit."""
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         ambi.seek_to_position(1000)
 
         out = tmp_path / "pos.wav"
@@ -167,7 +169,7 @@ class TestRenderToBinauralFile:
         )
 
         # Output equal to render from fresh file
-        fresh = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        fresh = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         ref_out = tmp_path / "pos_ref.wav"
         render_to_binaural_file(fresh, sh_first_order, str(ref_out))
 
@@ -177,7 +179,7 @@ class TestRenderToBinauralFile:
 
     def test_progress_callback(self, synthetic_ambix_path, sh_first_order, tmp_path):
         """Progress callback receives strictly increasing done, correct total."""
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         out = tmp_path / "progress.wav"
         collected = []
 
@@ -207,12 +209,12 @@ class TestRenderToBinauralFile:
             hrtf=hrtf, sampling_rate=48000, ambi_order=1, preprocess="LS",
         )
         try:
-            ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+            ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
             full_signal = ambi.get_signal_chunk(0, ambi.total_frames)
             full = sh2.apply_hrtf(full_signal).T
 
             out = tmp_path / "dfe.wav"
-            ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+            ambi2 = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
             render_to_binaural_file(ambi2, sh2, str(out))
 
             ir_len = sh2.get_IR_length()
@@ -237,7 +239,7 @@ class TestRenderToBinauralFile:
         path9 = tmp_path / "order2.wav"
         sf.write(str(path9), data, 48000, subtype="FLOAT")
 
-        ambi = AmbisonicsFile(str(path9), chunk_size=2048)
+        ambi = AmbisonicsFile(str(path9), chunk_size=block_size)
         out = tmp_path / "mismatch.wav"
         with pytest.raises(ValueError, match="(?i)channel"):
             render_to_binaural_file(ambi, sh_first_order, str(out))
@@ -246,7 +248,7 @@ class TestRenderToBinauralFile:
         self, synthetic_ambix_path, sh_first_order, tmp_path,
     ):
         """AttributeError when gain > 1.0."""
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         with pytest.raises(AttributeError, match="(?i)gain"):
             render_to_binaural_file(
                 ambi, sh_first_order, tmp_path / "gain_high.wav", gain=1.5,
@@ -256,7 +258,7 @@ class TestRenderToBinauralFile:
         self, synthetic_ambix_path, sh_first_order, tmp_path,
     ):
         """AttributeError when gain < 0."""
-        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=2048)
+        ambi = AmbisonicsFile(str(synthetic_ambix_path), chunk_size=block_size)
         with pytest.raises(AttributeError, match="(?i)gain"):
             render_to_binaural_file(
                 ambi, sh_first_order, tmp_path / "gain_low.wav", gain=-0.1,
