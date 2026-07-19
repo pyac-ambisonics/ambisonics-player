@@ -145,13 +145,11 @@ class SphericalHarmonics:
             daemon=True,
         )
         self._rotation_thread.start()
-        
-        # use this function because we will not calculate D otherwise
-        self.update_rotation_matrix([0, 0, 0])
 
         # States for overlap-add (must be reset on seek)
-        self.overlap_buffer = None 
-        self.overlap_buffer_old = None 
+        self.overlap_buffer = np.zeros((self.get_IR_length() - 1, 2), dtype=np.float32)
+        self.overlap_buffer_old = np.zeros_like(self.overlap_buffer)
+        self.interpolate_rot = None
         # overlap add L = self.get_IR_length()
         if block_size is None:
             block_size = next_power_of_two(self.get_IR_length())
@@ -163,7 +161,10 @@ class SphericalHarmonics:
         # prepare ramp for crossfading between rotations
         self._cf_length = 32
         self._ramp = hanning_ramp(self._cf_length, 2)
-        self._cf_flag = False
+        self._cf_flag = 0
+
+        # use this function because we will not calculate D otherwise
+        self.update_rotation_matrix([0, 0, 0])
 
         # prepare pre_gain for gianstaging
         self.pre_gain = 0.1
@@ -222,6 +223,7 @@ class SphericalHarmonics:
         # update our sh fft coefficients once (and on each rotation update)
         self.update_hrirs_fft(self.N)
 
+        self._cf_length = 16
         # allocate buffers
         self.overlap_buffer = np.zeros((self.get_IR_length() - 1, 2), dtype=np.float32)
         self.overlap_buffer_old = np.zeros_like(self.overlap_buffer)
@@ -289,10 +291,20 @@ class SphericalHarmonics:
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
         new_rot = new_D @ self.hrir_nm_fft
         with self._rotation_lock:
-            self._D['old'] = self._D['new']
+            self._D['old'] = self._D['new'].copy()
             self._D['new'] = new_D
-            self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+            self.hrir_nm_rot['old'] = self.hrir_nm_rot['new'].copy()
             self.hrir_nm_rot['new'] = new_rot
+
+            # also swap old OLA buffer. new one gets updated in OLA logic
+            # self.overlap_buffer_old = self.overlap_buffer.copy()
+            # self.overlap_buffer[:] = 0.0
+
+            # interpolate
+            # self.interpolate_rot = self.interpolate(self._last_rotation, rotation, block_size=self._cf_length)
+
+            # a crossfade needs to happen now!
+            self._cf_flag = 2
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -345,8 +357,6 @@ class SphericalHarmonics:
             if rotation.approx_equal(self._last_rotation, atol=self.atol):
                 continue
 
-            # update the last rotation
-            self._last_rotation = rotation
             # compute wigner D matrix
             alpha, beta, gamma = rotation.as_euler("zyz")
             new_D = self.rotation.real_wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
@@ -360,13 +370,103 @@ class SphericalHarmonics:
             # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
             new_rot = new_D @ self.hrir_nm_fft
             with self._rotation_lock:
-                self._D['old'] = self._D['new']
+                self._D['old'] = self._D['new'].copy()
                 self._D['new'] = new_D
-                self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+                self.hrir_nm_rot['old'] = self.hrir_nm_rot['new'].copy()
                 self.hrir_nm_rot['new'] = new_rot
+
+                # interpolate
+                # self.interpolate_rot = self.interpolate(self._last_rotation, rotation, block_size=self._cf_length)
+
+                # # also swap old OLA buffer. new one gets updated in OLA logic
+                # self.overlap_buffer_old = self.overlap_buffer.copy()
+                # self.overlap_buffer[:] = 0.0
+
                 # a crossfade needs to happen now!
-                self._cf_flag = True
+                self._cf_flag = 2
+
+        # update the last rotation
+        self._last_rotation = rotation
                 
+    def interpolate(self, angles_old: Rotation, angles_new: Rotation, block_size=16):
+        """
+        Interpolate a set of Wigner D matrices between old and new angles.
+        """
+        # old and new quaternions
+        quat_old = angles_old.as_quat()
+        quat_new = angles_new.as_quat()
+
+        # prepare array
+        n_blocks = self.N // block_size
+        channel_n = order_to_channel_n(self.ambi_order)
+        smooth = np.zeros((n_blocks, channel_n, channel_n), dtype=np.float32)
+
+        # interpolate
+        for i in range(n_blocks):
+            # For each sub‑block, compute an interpolated quaternion
+            # t between 0 and 1 for each sub‑block
+            t = (i + 1) / n_blocks
+            q_interp = self.slerp(quat_old, quat_new, t)
+            # Convert q_interp to a rotation matrix or directly compute
+            # the Wigner‑D matrix for this sub‑block boundary.
+            # Then perform amplitude interpolation between sub‑blocks.
+
+            rot = Rotation.from_quat(q_interp)
+            alpha, beta, gamma = rot.as_euler("zyz")
+            new_D = self.rotation.real_wigner_d_matrix(self.ambi_order, alpha, beta, gamma)
+            
+            smooth[i] = new_D
+
+        return smooth
+
+    def slerp(self, q1, q2, t, eps=1e-6):
+        """
+        Spherical linear interpolation between two quaternions.
+        
+        Parameters
+        ----------
+        q1, q2 : array_like, shape (4,)
+            Input unit quaternions in [x, y, z, w] order (scalar last).
+            They will be normalized internally.
+        t : float or array_like
+            Interpolation parameter in [0, 1]. 0 -> q1, 1 -> q2.
+        eps : float, optional
+            Small threshold for near‑linear case.
+
+        Returns
+        -------
+        q : ndarray, shape (4,)
+            Interpolated unit quaternion.
+        """
+        # Normalize inputs (they should already be unit, but safe)
+        q1 = q1 / np.linalg.norm(q1)
+        q2 = q2 / np.linalg.norm(q2)
+
+        # Compute the dot product (cosine of the angle)
+        dot = np.dot(q1, q2)
+
+        # If dot < 0, flip q2 to take the shorter path
+        if dot < 0.0:
+            q2 = -q2
+            dot = -dot
+
+        # Clamp to avoid numerical issues
+        dot = np.clip(dot, -1.0, 1.0)
+
+        # If the quaternions are nearly parallel, use linear interpolation (lerp)
+        if dot > 1.0 - eps:
+            result = q1 + t * (q2 - q1)
+            return result / np.linalg.norm(result)
+
+        # Standard Slerp
+        theta = np.arccos(dot)          # angle between quaternions
+        sin_theta = np.sin(theta)
+
+        w1 = np.sin((1.0 - t) * theta) / sin_theta
+        w2 = np.sin(t * theta) / sin_theta
+
+        return w1 * q1 + w2 * q2
+
 
     def get_rotation_matrix(self):
         """
@@ -523,13 +623,14 @@ class SphericalHarmonics:
         fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
 
         # convolve by multiplication in time domain over all channels, for each ear
-        n_samples, *_ = fft_ambi.shape
-        fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
+        fft_sum = np.ndarray((2, block_size), dtype=np.complex64)
+
+        with self._rotation_lock:
+            hrir_new = self.hrir_nm_rot['new'].copy()
 
         for ear in range(2):
-            with self._rotation_lock:
                 # perform convolution in rotated frequency domain and sum in frequency domain
-                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+                fft_sum[ear] = np.sum(fft_ambi.T * hrir_new[ear, :, :], axis=0)
 
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
@@ -541,7 +642,69 @@ class SphericalHarmonics:
         return sum_conv.T
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf_chunk_rot(self, ambi_signal: np.ndarray, block_size=1024):
+    def apply_hrtf_chunk_slerp(self, ambi_signal: np.ndarray, block_size=1024):
+        """
+        Convolve an ambisonic signal with the rotated HRTFs in the frequency domain to produce a stereo signal.
+        This function expects a signal as NDarray, as well as a blocksize to operate on (must fit the blocksize of `self.hrir_nm_rot`)
+
+        Parameters
+        ----------
+        ambi_signal : np.ndarray
+            Input block or stream (should have shape (n_samples, n_channels)).
+        block_size : int, optional
+            FFT size / processing block length. Default 1024.
+        gain : float, optional
+            A float between 0. and 1., applied after internal gain-staging, Default is 1.
+
+        Returns
+        -------
+        numpy.ndarray
+            Stereo time-domain array (n_samples, 2) after convolution and gain staging.
+
+        Notes
+        -------------
+        Assumes self.hrirs_nm_fft has been prepared via update_hrirs_fft(block_size).
+        """
+    
+        # checking of channel count should be done elsewhere
+        # check for correct gain also elsewhere!
+
+        # apply rotation to the sh_hrir
+        # not needed, we only apply rotation and update hrir_nm_rot on a new rotation
+        # self._apply_rotation()
+
+        # sh_hrir should have the shape (2, ambi_channels, n bins)
+        #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+
+        # make fft of our ambi signal. shape (n_samples, n_channels)
+        fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
+
+        # convolve by multiplication in time domain over all channels, for each ear
+        fft_sum = np.ndarray((2, block_size), dtype=np.complex64)
+
+        with self._rotation_lock:
+            interpl_rot = self.interpolate_rot
+
+
+        for i, D in enumerate(interpl_rot):
+            start = i * self._cf_length
+            end = (i+1) * self._cf_length
+            ambi_sub_block = fft_ambi.T[:, start:end]
+            for ear in range(2):
+                # perform convolution in rotated frequency domain and sum in frequency domain
+                fft_sum[ear, start:end] = np.sum((D @ ambi_sub_block) * self.hrir_nm_rot['new'][ear, :, start:end], axis=0)
+
+        # Sum over channels -> single‑channel binaural signals
+        sum_conv = np.fft.ifft(fft_sum).real
+
+        # do gain staging
+        sum_conv *= self.pre_gain
+        # no test for clipping because of time
+        # transpose, since sounddevice expects shape (n_samples, n_channels)
+        return sum_conv.T
+    
+    # apply the hrtf data to an ambisonics file
+    def apply_hrtf_chunk_fft(self, ambi_signal: np.ndarray, block_size=1024):
         """
         Convolve an ambisonic signal chunk with the rotated HRTFs in the frequency domain to produce a stereo signal.
         This function expects
@@ -581,9 +744,8 @@ class SphericalHarmonics:
         fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
 
         # convolve by multiplication in time domain over all channels, for each ear
-        n_samples, *_ = fft_ambi.shape
-        fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
-        fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
+        fft_sum_new = np.ndarray((2, block_size), dtype=np.complex64)
+        fft_sum_old = np.ndarray((2, block_size), dtype=np.complex64)
 
         # snapshot the filters under lock
         with self._rotation_lock:
@@ -591,7 +753,80 @@ class SphericalHarmonics:
             hrir_old = self.hrir_nm_rot['old'].copy()
             do_fade = self._cf_flag
             # Consume the flag so it doesn't fire again on the next block
-            self._cf_flag = False
+            self._cf_flag -=1
+
+        for ear in range(2):
+            # perform convolution in rotated frequency domain and sum in frequency domain
+            # get old and new rotation resluts
+            fft_sum_new[ear] = np.sum(fft_ambi.T * hrir_new[ear, :, :], axis=0)
+            fft_sum_old[ear] = np.sum(fft_ambi.T * hrir_old[ear, :, :], axis=0)
+
+        # crossfade in frequency domain before anything else
+        n = np.arange(block_size)
+        sum_final = np.cos(np.pi * n / 2 * block_size) * fft_sum_old + \
+                    np.sin(np.pi * n / 2 * block_size) * fft_sum_new
+
+        # ifft and gain staging
+        # sum_conv = np.fft.ifft(fft_sum_new).real * self.pre_gain
+        # sum_conv_old = np.fft.ifft(fft_sum_old).real * self.pre_gain
+        sum_final = np.fft.ifft(sum_final).real * self.pre_gain
+
+        # no test for clipping because of time
+        # transpose, since sounddevice expects shape (n_samples, n_channels)
+        # return sum_conv.T, sum_conv_old.T, do_fade
+        return sum_final.T
+    
+    # apply the hrtf data to an ambisonics file
+    def apply_hrtf_chunk_rot(self, ambi_signal: np.ndarray, block_size=1024):
+        """
+        Convolve an ambisonic signal chunk with the rotated HRTFs in the frequency domain to produce an fft for smoother rotation crossfade in frequency domain.
+        This function expects
+
+        Parameters
+        ----------
+        ambi_signal : np.ndarray
+            Input block or stream (should have shape (n_samples, n_channels)).
+        block_size : int, optional
+            FFT size / processing block length. Default 1024.
+        gain : float, optional
+            A float between 0. and 1., applied after internal gain-staging, Default is 1.
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray, bool
+            2x Stereo time-domain array (n_samples, 2) after convolution and gain staging.
+            once for old rotation, once for new rotation.
+            If a crossfade is required, bool will be True
+
+        Notes
+        -------------
+        Assumes self.hrirs_nm_fft has been prepared via update_hrirs_fft(block_size).
+        """
+    
+        # checking of channel count should be done elsewhere
+        # check for correct gain also elsewhere!
+
+        # apply rotation to the sh_hrir
+        # not needed, we only apply rotation and update hrir_nm_rot on a new rotation
+        # self._apply_rotation()
+
+        # sh_hrir should have the shape (2, ambi_channels, n bins)
+        #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+
+        # make fft of our ambi signal. shape (n_samples, n_channels)
+        fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
+
+        # convolve by multiplication in time domain over all channels, for each ear
+        fft_sum = np.ndarray((2, block_size), dtype=np.complex64)
+        fft_sum_old = np.ndarray((2, block_size), dtype=np.complex64)
+
+        # snapshot the filters under lock
+        with self._rotation_lock:
+            hrir_new = self.hrir_nm_rot['new'].copy()
+            hrir_old = self.hrir_nm_rot['old'].copy()
+            do_fade = self._cf_flag
+            # Consume the flag so it doesn't fire again on the next block
+            self._cf_flag -=1
 
         for ear in range(2):
             # perform convolution in rotated frequency domain and sum in frequency domain
@@ -620,6 +855,8 @@ class SphericalHarmonics:
         sh_length = self.get_IR_length()
 
         # apply hrtf
+        # stereo = self.apply_hrtf_chunk_fft(chunk, self.N)
+        # stereo = self.apply_hrtf_chunk_slerp(chunk, self.N)
         stereo = self.apply_hrtf_chunk(chunk, self.N)
 
         # add overlap to stereo output
@@ -647,34 +884,17 @@ class SphericalHarmonics:
         stereo_new[:sh_length-1] += self.overlap_buffer       # only new filter's tail
         stereo_old[:sh_length-1] += self.overlap_buffer_old   # only old filter's tail
 
-        # extract tails for the next block
-        tail_new = stereo_new[block_size:block_size + sh_length - 1].copy()
-        tail_old = stereo_old[block_size:block_size + sh_length - 1].copy()
 
-        if do_fade:
+        if do_fade > 0:
             # do crossfade
-            output = stereo_new.copy()
-            output[:self._cf_length] = (1.0 - self._ramp) * stereo_old[:self._cf_length] + \
+            stereo_new[:self._cf_length] = (1.0 - self._ramp) * stereo_old[:self._cf_length] + \
                                                self._ramp * stereo_new[:self._cf_length]
             
-            # crossfade our tails!
-            # new tail is the currently incoming block!
-            tail_output = tail_new.copy()
-            # cf between the two. so we add the overlap buffer (one update behind) to the new tail (currently incoming block)
-            tail_output[:self._cf_length] = (1.0 - self._ramp) * tail_old[:self._cf_length] + \
-                                                    self._ramp * tail_new[:self._cf_length]
-
-            # After the fade, we have fully transitioned to the new filter.
-            # Unify both states to the crossfaded tail so the OLA stays coherent.
-            self.overlap_buffer[:]     = tail_output
-            self.overlap_buffer_old[:] = tail_output
-        else: 
-            # No rotation – both filters are identical; just use the new one.
-            output = conv_new
-            self.overlap_buffer[:]     = tail_new
-            self.overlap_buffer_old[:] = tail_new
+        # extract tails for the next block
+        self.overlap_buffer = stereo_new[block_size:block_size + sh_length - 1]
+        self.overlap_buffer_old = stereo_old[block_size:block_size + sh_length - 1]
                 
-        return output[:block_size]
+        return stereo_new[:block_size]
         
 
     def flush(self) -> np.ndarray:

@@ -1089,7 +1089,7 @@ class AudioPlayerGUI:
                     self._decoder_cache[cache_key] = (player.sh.hrtf, new_sh)
 
                 if change:
-                    player._reset_process_variables()
+                    player.update_process_variables()
 
                 result = {
                     "order": player.ambi_file.get_order(),

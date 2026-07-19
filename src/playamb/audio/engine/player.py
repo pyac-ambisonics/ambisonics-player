@@ -83,6 +83,12 @@ class AudioPlayer:
             except queue.Full:
                 continue
         return False
+    
+    def update_process_variables(self):
+        """
+        Wraps Spherical Harmonics process variables update
+        """
+        self.sh.update_process_variables(self.ambi_file.get_chunk_size())
         
     def _process_loop(self):
         """Processing thread: reads chunks, processes, and puts into queue."""
@@ -126,7 +132,7 @@ class AudioPlayer:
             
             # processes one chunk and return a stereo block, 
             # updating the overlap buffer internally.
-            processed_block = self.sh.process_ola_rot(chunk)
+            processed_block = self.sh.process_ola(chunk)
 
             # # Put into queue (waits instead of dropping; aborts on stop)
             # if not self._put_stop_aware(processed_block):
