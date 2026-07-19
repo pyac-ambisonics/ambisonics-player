@@ -125,10 +125,10 @@ def hanning_ramp(K: int, n_channels: int = 1) -> np.ndarray:
         An array of values ramping up from 0 to 1
     """
     if K <= 1:
-        return np.ones(K, dtype=np.float64)
-    i = np.arange(K, dtype=np.float64)
+        return np.ones(K, dtype=np.float32)
+    i = np.arange(K, dtype=np.float32)
     
-    ramp = np.empty((K, n_channels), dtype=np.float64)
+    ramp = np.empty((K, n_channels), dtype=np.float32)
     for chan in range(n_channels):
         ramp[:, chan] = 0.5 * (1.0 - np.cos(i * np.pi / (K - 1)))
     
