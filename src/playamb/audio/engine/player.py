@@ -174,7 +174,7 @@ class AudioPlayer:
 
             # Put into queue
             try:
-                self.audio_queue.put(processed_block, timeout=1)
+                self.audio_queue.put(processed_block, timeout=0.1)
             except queue.Full:
                 # probably the playback was stopped or paused. in this case we can safely drop the block without notifying
                 if not self.pause_event.is_set() and not self.stop_event.is_set():
@@ -414,7 +414,7 @@ class AudioPlayer:
         # set palying flag to true
         self.play_event.set()
 
-        print(f"Playing from {self.ambi_file.get_current_time()} seconds...")
+        print(f"Playing from {self.ambi_file.get_current_time():.2f} seconds...")
         self.stream.start()
 
     def _on_stream_finished(self):
@@ -434,7 +434,7 @@ class AudioPlayer:
         self.pause_event.set()
         self.play_event.clear()
         
-        print(f"Paused at {self.ambi_file.get_current_time()} seconds.")
+        print(f"Paused at {self.ambi_file.get_current_time():.2f} seconds.")
 
     def resume(self):
         """
@@ -450,7 +450,7 @@ class AudioPlayer:
             self.play()
         else:
             self.play_event.set()
-            print(f"Resumed at {self.ambi_file.get_current_time()} seconds.")
+            print(f"Resumed at {self.ambi_file.get_current_time():.2f} seconds.")
 
     def stop(self, reset_position=True):
         """
