@@ -80,11 +80,7 @@ class AudioPlayer:
         self.is_loaded = True
         
         # prepare ramp for crossfading between rotations
-        self.cf_length = 32
-        self.ramp = hanning_ramp(self.cf_length, 2)
-
-        # prepare ramp for crossfading between rotations
-        self.cf_length = 32
+        self.cf_length = 128
         self.ramp = hanning_ramp(self.cf_length, 2)
 
 
@@ -229,11 +225,10 @@ class AudioPlayer:
         """
         
         # update our block size
-        # using self.blocksize instead. but this may lead to problem? check
         block_size, *_ = chunk.shape
 
         # apply hrtf
-        stereo, stereo_old = self.sh.apply_hrtf_rot(chunk, self.N)
+        stereo, stereo_old = self.sh.apply_hrtf_chunk_rot(chunk, self.N)
 
         # add overlap to stereo output
         stereo[:self.sh_length-1]     += self.overlap_buffer

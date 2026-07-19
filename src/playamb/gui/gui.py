@@ -270,9 +270,9 @@ class AudioPlayerGUI:
         ttk.Label(card, textvariable=self.pipeline_status, style="SmallInfo.TLabel").grid(
             row=3, column=0, columnspan=2, sticky="w", pady=(6, 0)
         )
-        ttk.Label(card, textvariable=self.loading_text, style="SmallInfo.TLabel").grid(
-            row=4, column=0, columnspan=3, sticky="w", pady=(6, 0)
-        )
+        # ttk.Label(card, textvariable=self.loading_text, style="SmallInfo.TLabel").grid(
+        #     row=4, column=0, columnspan=3, sticky="w", pady=(6, 0)
+        # )
 
         card.columnconfigure(0, weight=1)
         card.columnconfigure(1, weight=1)
@@ -415,21 +415,21 @@ class AudioPlayerGUI:
         )
         self.hp_sample_size_box.grid(row=3, column=5, sticky="w", padx=(14, 18), pady=(10, 0))
 
-        # make it so we don't accidentally scroll in comboboxes
-        # Windows / macOS
-        self.headphone_box.bind("<MouseWheel>", self.__no_scroll)
-        self.block_size_box.bind("<MouseWheel>", self.__no_scroll)
-        self.order_box.bind("<MouseWheel>", self.__no_scroll)
-        self.hp_sample_size_box.bind("<MouseWheel>", self.__no_scroll)
-        # Linux (X11)
-        self.headphone_box.bind("<Button-4>", self.__no_scroll)
-        self.headphone_box.bind("<Button-5>", self.__no_scroll)
-        self.block_size_box.bind("<Button-4>", self.__no_scroll)
-        self.block_size_box.bind("<Button-5>", self.__no_scroll)
-        self.order_box.bind("<Button-4>", self.__no_scroll)
-        self.order_box.bind("<Button-5>", self.__no_scroll)
-        self.hp_sample_size_box.bind("<Button-4>", self.__no_scroll)
-        self.hp_sample_size_box.bind("<Button-5>", self.__no_scroll)
+        # Group allcombo boxes in a list
+        combo_boxes = [
+            self.headphone_box, 
+            self.block_size_box, 
+            self.order_box, 
+            self.hp_sample_size_box
+        ]
+        # Bind all mouse wheel events to custom handler
+        for box in combo_boxes:
+            # Windows / macOS
+            box.bind("<MouseWheel>", self.__no_scroll)
+            # Linux scroll up
+            box.bind("<Button-4>", self.__no_scroll)
+            # Linux scroll down      
+            box.bind("<Button-5>", self.__no_scroll)
 
         # create
 
@@ -592,6 +592,9 @@ class AudioPlayerGUI:
         Helper function that prevents the dafault action on scrolling when bound to a combobox.
         """
         # Disable mouse wheel scrolling on the combobox
+        # but still scroll the main frame
+        self.on_mousewheel(event)
+
         # prevents the default action
         return "break"
 
@@ -819,7 +822,7 @@ class AudioPlayerGUI:
             f"{result['sample_rate']} Hz | "
             f"block {self.block_size_value.get()} | "
             f"HRTF {self.hrtf_path_value.get()} | "
-            f"headphone {result['headphone']}"
+            f"Headphone {result['headphone']}"
         )
 
     # def update_rotation_backend_status(self):
@@ -1532,7 +1535,7 @@ class AudioPlayerGUI:
                 self.chirality_box["state"] = "readonly"
             case "Off":
                 self.start_stop_tracking_button.state(["disabled"])
-                print(self.tracking_mode.get())
+                #print(self.tracking_mode.get())
 
         if reset_orientation:
             orientation = self.orientation_state.set(0.0, 0.0, 0.0, source="off")

@@ -501,9 +501,9 @@ class SphericalHarmonics:
         return sum_conv.T
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf_rot(self, ambi_signal: np.ndarray, block_size=1024):
+    def apply_hrtf_chunk_rot(self, ambi_signal: np.ndarray, block_size=1024):
         """
-        Convolve an ambisonic signal with the rotated HRTFs in the frequency domain to produce a stereo signal.
+        Convolve an ambisonic signal chunk with the rotated HRTFs in the frequency domain to produce a stereo signal.
         This function expects
 
         Parameters
