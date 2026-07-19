@@ -118,7 +118,7 @@ hrtf.load_hp_filter("Sennheiser HD650")     # optional headphone compensation
 sh = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi.get_samplerate(),
                         ambi_order=ambi.order, preprocess="MagLS")
 
-stereo = sh.apply_hrtf(ambi.get_signal_chunk(0, ambi.total_frames)).T
+stereo = sh.apply_hrtf_full(ambi.get_signal_chunk(0, ambi.total_frames)).T
 sf.write("scene_binaural.wav", stereo, ambi.get_samplerate())
 ```
 
