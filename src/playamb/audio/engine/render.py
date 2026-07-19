@@ -80,7 +80,7 @@ class OverlapAddProcessor:
             tail is kept in the internal overlap buffer.
         """
         block_size = chunk.shape[0]
-        stereo = self.sh.apply_hrtf_fast(chunk, self.fft_size)
+        stereo = self.sh.apply_hrtf_chunk(chunk, self.fft_size)
         # add the tail carried over from the previous block
         stereo[: self.ir_length - 1] += self.overlap_buffer
         # save the new tail for the next block
