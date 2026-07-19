@@ -76,6 +76,12 @@ class AudioPlayer:
         # Thread and stream objects
         self.processing_thread = None
         self.stream = None
+        # construction received a valid, validated source: ready to play
+        self.is_loaded = True
+        
+        # prepare ramp for crossfading between rotations
+        self.cf_length = 32
+        self.ramp = hanning_ramp(self.cf_length, 2)
 
         # prepare ramp for crossfading between rotations
         self.cf_length = 32
@@ -103,6 +109,21 @@ class AudioPlayer:
         self.overlap_buffer = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
         self.overlap_buffer_old = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
 
+    def _put_stop_aware(self, item) -> bool:
+        """
+        Put an item into the audio queue, waiting while playback is alive.
+
+        Returns False (without putting) once stop_event is set, so the
+        processing thread never blocks past a stop and never drops blocks.
+        """
+        while not self.stop_event.is_set():
+            try:
+                self.audio_queue.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+        
     def _process_loop(self):
         """Processing thread: reads chunks, processes, and puts into queue."""
         
@@ -128,8 +149,11 @@ class AudioPlayer:
 
             # Pause handling: block if paused but not stopped
             if self.pause_event.is_set():
-                # Block indefinitely until play_event is set (resume or stop)
-                self.play_event.wait()
+                # Wait for play_event (resume or stop) with a bounded timeout
+                # so a stop racing past this check cannot strand the thread.
+                while not self.play_event.wait(timeout=0.1):
+                    if self.stop_event.is_set():
+                        break
             
                 # If stop was triggered, exit the outer loop
                 if self.stop_event.is_set():
@@ -144,6 +168,10 @@ class AudioPlayer:
             # updating the overlap buffer internally.
             processed_block = self._process_chunk_cf(chunk)
 
+            # # Put into queue (waits instead of dropping; aborts on stop)
+            # if not self._put_stop_aware(processed_block):
+            #     break
+
             # Put into queue
             try:
                 self.audio_queue.put(processed_block, timeout=1)
@@ -156,7 +184,8 @@ class AudioPlayer:
             # at end of file add the overlap buffer a final time
             if end_of_file:
                 # add the remaining overlapp buffer to the queue
-                self.audio_queue.put(self.overlap_buffer.copy())
+                if not self._put_stop_aware(self.overlap_buffer.copy()):
+                    break
 
                 #check for looping
                 if self.loop:
@@ -165,7 +194,8 @@ class AudioPlayer:
                     self.ambi_file.reset_position()
                 else:
                     # queue None-item as flag that playback has ended
-                    self.audio_queue.put(None)
+                    if not self._put_stop_aware(None):
+                        break
                     # clear the play event
                     self.play_event.clear()
 

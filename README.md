@@ -109,8 +109,7 @@ After that, `import playamb` works from any directory.
 ### Example 1 — offline rendering to a binaural WAV (no audio device needed)
 
 ```python
-import soundfile as sf
-from playamb import AmbisonicsFile, HRTF, SphericalHarmonics
+from playamb import AmbisonicsFile, HRTF, SphericalHarmonics, render_to_binaural_file
 
 ambi = AmbisonicsFile("scene_ambix.wav")    # order auto-detected from channel count
 hrtf = HRTF()                               # default FABIAN HRTF
@@ -118,8 +117,8 @@ hrtf.load_hp_filter("Sennheiser HD650")     # optional headphone compensation
 sh = SphericalHarmonics(hrtf=hrtf, sampling_rate=ambi.get_samplerate(),
                         ambi_order=ambi.order, preprocess="MagLS")
 
-stereo = sh.apply_hrtf_full(ambi.get_signal_chunk(0, ambi.total_frames)).T
-sf.write("scene_binaural.wav", stereo, ambi.get_samplerate())
+# streams chunk-by-chunk: memory stays 0(chunk) even for hours-long files
+render_to_binaural_file(ambi, sh, "scene_binaural.wav")
 ```
 
 ### Example 2 — real-time playback with transport control
@@ -151,6 +150,19 @@ player.close()
 
 Note: `import playamb` also imports the GUI module, so `tkinter` must be
 available (it ships with the standard CPython installer).
+
+### Runnable examples
+
+Self-contained example scripts live in `examples/` (run from the repository
+root after `pip install -e .`):
+
+```powershell
+python examples\make_test_signal.py test_ambix.wav                # synthesize test material
+python examples\render_to_binaural.py test_ambix.wav out.wav --headphone "Sennheiser HD650"
+python examples\playback_demo.py test_ambix.wav --duration 10
+```
+
+Each script has `--help` describing all options.
 
 ## Head Tracking Status
 
