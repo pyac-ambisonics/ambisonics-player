@@ -485,7 +485,6 @@ class SphericalHarmonics:
         # convolve by multiplication in time domain over all channels, for each ear
         n_samples, *_ = fft_ambi.shape
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
-        fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
             with self._rotation_lock:
