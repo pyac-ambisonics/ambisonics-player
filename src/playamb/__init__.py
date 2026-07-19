@@ -32,6 +32,7 @@ __all__ = [
     "ambix_channels_to_order", 
     "next_power_of_two", 
     "order_to_channel_n", 
-    "resolve_path"
+    "resolve_path",
+    "hanning_ramp"
     "__version__",
 ]

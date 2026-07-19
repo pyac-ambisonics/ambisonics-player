@@ -51,7 +51,7 @@ def write_test_files(filepath, orders=[1, 3, 5, 7], hp_filters=["None", "Diffuse
                         )
                 
                 # render file
-                stereo = sh.apply_hrtf(ambix.get_signal_chunk(0, ambix.total_frames)).T
+                stereo = sh.apply_hrtf_full(ambix.get_signal_chunk(0, ambix.total_frames)).T
 
                 # write soundfile
                 if hp_names is None:

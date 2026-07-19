@@ -51,6 +51,9 @@ class HRTF:
         self.hrirs, self.sources = self.load_HRTF()
         self.hrirs_linear = self.hrirs.copy()
 
+        # keep track of the sampling rate
+        self.fs = self.hrirs.sampling_rate
+
         # make a list of all subdirectories of our Headphone filters
         self.resources = self.app_dir / "resources"
         self.hp_dir = self.resources / "Headphones"
@@ -64,6 +67,61 @@ class HRTF:
 
         # store the current HP filter name
         self.current_filter = None
+
+    def resample(self, fs, truncate=True):
+        """
+        Resample the HRTF to the given samplerate. This will truncate the HRTF by default on upsampling!
+
+        Parameters
+        ----------
+        fs : int
+            The samplerate to resample to
+        truncate : bool, optional
+            Determines if the Signal should be truncated to it's original sample count if 
+            sample count is more than ebfore after upsampling
+        """
+
+        if fs != self.fs:
+            self.hrirs = self._resample_save(self.hrirs, fs, truncate)
+            self.hrirs_linear = self._resample_save(self.hrirs_linear, fs, truncate)
+
+    def _resample_save(self, signal: pf.Signal, fs, truncate=True):
+        """
+        Resample the given signal to the given samplerate. This will truncate the signal by default on upsampling!
+
+        Parameters
+        ----------
+        fs : int
+            The samplerate to resample to
+        truncate : bool, optional
+            Determines if the Signal should be truncated to it's original sample count if 
+            sample count is more than before after upsampling
+        """
+        # current samplecount
+        n_samples = signal.n_samples
+
+        # resample hrirs
+        signal = pf.dsp.resample(signal, 
+                                sampling_rate=fs, 
+                                match_amplitude='freq'
+                                )
+        
+        # truncate the signal if desired to shorter signal after upsampling for performance
+        if truncate and n_samples < signal.n_samples:
+            extra = signal.n_samples - n_samples
+
+            # fade out the signal first
+            signal = pf.dsp.time_window(signal, (n_samples-extra, n_samples-1), shape='right')
+            # then crop (borken for some reason)
+            #signal = pf.dsp.time_crop(signal, (0, n_samples))
+
+            # use the pyfar implementation until the bug is fixed
+            indices = np.arange(signal.n_samples)
+            mask = ((indices >= 0) & (indices <= n_samples))
+            time_data = signal.time[..., mask]
+            signal = pf.Signal(time_data, signal.sampling_rate)
+
+        return signal
 
     def get_IR_length(self, linear=False):
         """
@@ -188,11 +246,11 @@ class HRTF:
             hp_filter = hp_filter[0]
         print(f"Loaded Headphone Filter {name} from wav")
 
-        fs = self.hrirs_linear.sampling_rate
-        if hp_filter.sampling_rate != fs:
+        # resample if needed
+        if hp_filter.sampling_rate != self.fs:
             hp_filter = pf.dsp.resample(
                 hp_filter,
-                self.hrirs_linear.sampling_rate,
+                self.fs,
                 match_amplitude="freq",
             )
         
@@ -393,7 +451,7 @@ class Processing:
 
         # below cutoff: do simple least squares
         # do regular  least squares -> simple matrix mult
-        hrirs_sh = (sh.basis_inv @ hrirs).T.freq_raw
+        hrirs_sh = self.__ls(hrirs, sh).freq_raw
         nm_magls = hrirs_sh.copy()
         sh_basis = sh.basis.copy()
 

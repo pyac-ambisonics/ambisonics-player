@@ -12,6 +12,8 @@ from scipy.spatial.transform import Rotation
 from playamb.audio.engine.hrtf import HRTF, Processing
 from playamb.audio.rotation.rotation import RotationMatrix
 from playamb.utils.utils import next_power_of_two
+from playamb.utils.utils import order_to_channel_n
+from playamb.utils.utils import hanning_ramp
 
 class SphericalHarmonics:
     """
@@ -46,7 +48,7 @@ class SphericalHarmonics:
     """
 
     # Constructor
-    def __init__(self, hrtf: HRTF = None, sampling_rate=48e3, ambi_order=1, preprocess='MagLS'):
+    def __init__(self, hrtf: HRTF = None, sampling_rate=44_100, ambi_order=1, preprocess='MagLS'):
         """Initialize spherical-harmonic HRTF processing.
 
         Parameters
@@ -75,11 +77,8 @@ class SphericalHarmonics:
             self.hrtf = hrtf
 
         # make sure the sampling rate is correct and resample if necessary
-        if self.hrtf.hrirs.sampling_rate != sampling_rate:
-            self.hrtf.hrirs = pf.dsp.resample(self.hrtf.hrirs, 
-                                              sampling_rate=sampling_rate, 
-                                              match_amplitude='freq'
-                                              )
+        if self.hrtf.fs != sampling_rate:
+            self.hrtf.resample(sampling_rate)
 
         # store the sources in a Sampling Sphere
         self.sources = sh.SamplingSphere.from_coordinates(self.hrtf.sources)
@@ -121,8 +120,14 @@ class SphericalHarmonics:
         # create SH rotation unit
         self.rotation = RotationMatrix()
         # prepare rotated hrir's, and our rotation matrix, with all angles 0 currently
-        self.hrir_nm_rot = None
-        self._D = None
+        self.hrir_nm_rot = {
+                           'old' : self.hrir_nm_fft.copy(),
+                           'new' : self.hrir_nm_fft.copy()
+                           }
+        self._D = {
+                  'old' : np.eye(order_to_channel_n(ambi_order)),
+                  'new' : np.eye(order_to_channel_n(ambi_order))
+                  }
         self._last_rotation = Rotation.from_euler('zyx', (0, 0, 0))
         self.atol = np.deg2rad(1)
 
@@ -130,6 +135,7 @@ class SphericalHarmonics:
         self._rotation_queue = queue.Queue(maxsize=1)
         self._rotation_update = threading.Event()
         self._stop_rotation_thread = threading.Event()
+        self._rotation_cf_needed = False
 
         # start the rotation thread
         self._rotation_thread = threading.Thread(
@@ -143,6 +149,10 @@ class SphericalHarmonics:
 
         # prepare pre_gain for gianstaging
         self.pre_gain = 0.1
+
+        # prepare ramp for crossfading between rotations
+        self.cf_length = 32
+        self.ramp = hanning_ramp(self.cf_length)
         print(f"Setting up Spherical Harmonics took {time.time() - start:.2f}s")
 
     def update_order(self, order: int, block_size=None):
@@ -239,8 +249,11 @@ class SphericalHarmonics:
         # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
         new_rot = new_D @ self.hrir_nm_fft
         with self._rotation_lock:
-            self._D = new_D
-            self.hrir_nm_rot = new_rot
+            self._D['old'] = self._D['new']
+            self._D['new'] = new_D
+            self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+            self.hrir_nm_rot['new'] = new_rot
+            self._rotation_cf_needed = True
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -308,14 +321,17 @@ class SphericalHarmonics:
             # self.hrir_nm_rot = np.einsum("ij, cjk -> cik", self.D, hrir_rot)
             new_rot = new_D @ self.hrir_nm_fft
             with self._rotation_lock:
-                self._D = new_D
-                self.hrir_nm_rot = new_rot
+                self._D['old'] = self._D['new']
+                self._D['new'] = new_D
+                self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+                self.hrir_nm_rot['new'] = new_rot
+                self._rotation_cf_needed = True
                 
 
     def get_rotation_matrix(self):
         """
         Returns a copy fo the currently stored Wigner D matrix in a thread safe manner.
-        Returns None if no new rotation matrix is available.
+        Returns None if no rotation matrix is available.
         """
         with self._rotation_lock:
             if self._D is None:
@@ -341,10 +357,11 @@ class SphericalHarmonics:
         # if D is None, do nothing and keep our latest rotated hrir_nm
         if D is not None:
             # using the fft, since we expect this to be faster than time domain
-            self.hrir_nm_rot = D @ self.hrir_nm_fft
+            self.hrir_nm_rot['old'] = D['old'] @ self.hrir_nm_fft
+            self.hrir_nm_rot['new'] = D['new'] @ self.hrir_nm_fft
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf(self, ambi_signal: pf.Signal, gain=1.):
+    def apply_hrtf_full(self, ambi_signal: pf.Signal, gain=1.):
         """
         Convolve an ambisonic signal with the rotated HRTFs to produce a stereo signal.
 
@@ -428,10 +445,10 @@ class SphericalHarmonics:
         return stereo_time
     
     # apply the hrtf data to an ambisonics file
-    def apply_hrtf_fast(self, ambi_signal: np.ndarray, block_size=1024):
+    def apply_hrtf_chunk(self, ambi_signal: np.ndarray, block_size=1024):
         """
         Convolve an ambisonic signal with the rotated HRTFs in the frequency domain to produce a stereo signal.
-        This function expects
+        This function expects a signal as NDarray, as well as a blocksize to operate on (must fit the blocksize of `self.hrir_nm_rot`)
 
         Parameters
         ----------
@@ -468,12 +485,13 @@ class SphericalHarmonics:
         # convolve by multiplication in time domain over all channels, for each ear
         n_samples, *_ = fft_ambi.shape
         fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
+        fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
 
         for ear in range(2):
-            # perform convolution in rotated frequency domain and sum in frequency domain
             with self._rotation_lock:
-                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot[ear, :, :], axis=0)
-        
+                # perform convolution in rotated frequency domain and sum in frequency domain
+                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+
         # Sum over channels -> single‑channel binaural signals
         sum_conv = np.fft.ifft(fft_sum).real
 
@@ -483,6 +501,76 @@ class SphericalHarmonics:
         # transpose, since sounddevice expects shape (n_samples, n_channels)
         return sum_conv.T
     
+    # apply the hrtf data to an ambisonics file
+    def apply_hrtf_rot(self, ambi_signal: np.ndarray, block_size=1024):
+        """
+        Convolve an ambisonic signal with the rotated HRTFs in the frequency domain to produce a stereo signal.
+        This function expects
+
+        Parameters
+        ----------
+        ambi_signal : np.ndarray
+            Input block or stream (should have shape (n_samples, n_channels)).
+        block_size : int, optional
+            FFT size / processing block length. Default 1024.
+        gain : float, optional
+            A float between 0. and 1., applied after internal gain-staging, Default is 1.
+
+        Returns
+        -------
+        numpy.ndarray, numpy.ndarray
+            2x Stereo time-domain array (n_samples, 2) after convolution and gain staging.
+            once for old rotation, once for new rotation
+
+        Notes
+        -------------
+        Assumes self.hrirs_nm_fft has been prepared via update_hrirs_fft(block_size).
+        """
+    
+        # checking of channel count should be done elsewhere
+        # check for correct gain also elsewhere!
+
+        # apply rotation to the sh_hrir
+        # not needed, we only apply rotation and update hrir_nm_rot on a new rotation
+        # self._apply_rotation()
+
+        # sh_hrir should have the shape (2, ambi_channels, n bins)
+        #fft_sh = np.fft.fft(self.hrirs_nm, n=block_size, axis=-1)
+
+        # make fft of our ambi signal. shape (n_samples, n_channels)
+        fft_ambi = np.fft.fft(ambi_signal, n=block_size, axis=0)
+
+        # convolve by multiplication in time domain over all channels, for each ear
+        n_samples, *_ = fft_ambi.shape
+        fft_sum = np.ndarray((2, n_samples), dtype=np.complex64)
+        fft_sum_old = np.ndarray((2, n_samples), dtype=np.complex64)
+
+        for ear in range(2):
+            # perform convolution in rotated frequency domain and sum in frequency domain
+            # get old and new rotation resluts
+            with self._rotation_lock:
+                fft_sum[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['new'][ear, :, :], axis=0)
+                fft_sum_old[ear] = np.sum(fft_ambi.T * self.hrir_nm_rot['old'][ear, :, :], axis=0)
+
+                # release the rotation flag
+                self._rotation_cf_needed = False
+
+        # set this so when no rotation happens, new and old are the same and we don't carry the old rotation over
+        self.hrir_nm_rot['old'] = self.hrir_nm_rot['new']
+
+        sum_conv = np.fft.ifft(fft_sum).real
+        sum_conv_old = np.fft.ifft(fft_sum_old).real
+
+        # # do crossfade
+        # sum_conv[ear, :self.cf_length] = (1.0 - self.ramp) * sum_conv_old[ear,:self.cf_length] + self.ramp * sum_conv[ear, :self.cf_length]
+
+        # do gain staging
+        sum_conv *= self.pre_gain
+        sum_conv_old *= self.pre_gain
+        # no test for clipping because of time
+        # transpose, since sounddevice expects shape (n_samples, n_channels)
+        return sum_conv.T, sum_conv_old.T
+
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
     # with ambisonics audio
     def update_hrirs_fft(self, block_size: int):

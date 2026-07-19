@@ -7,6 +7,7 @@ import soundfile as sf
 from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.utils.utils import next_power_of_two
+from playamb.utils.utils import hanning_ramp
 
 class AudioPlayer:
     """
@@ -60,6 +61,7 @@ class AudioPlayer:
 
         # States for overlap-add (must be reset on seek)
         self.overlap_buffer = None 
+        self.overlap_buffer_old = None 
         # overlap add L
         self.sh_length = None
         # overlap add M. needs to be updated if chunk_size gets updated
@@ -74,6 +76,10 @@ class AudioPlayer:
         # Thread and stream objects
         self.processing_thread = None
         self.stream = None
+
+        # prepare ramp for crossfading between rotations
+        self.cf_length = 32
+        self.ramp = hanning_ramp(self.cf_length, 2)
 
 
     # reset all variables in case of seek or stop
@@ -95,6 +101,7 @@ class AudioPlayer:
 
         # allocate buffers
         self.overlap_buffer = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
+        self.overlap_buffer_old = np.zeros((self.sh_length - 1, 2), dtype=np.float32)
 
     def _process_loop(self):
         """Processing thread: reads chunks, processes, and puts into queue."""
@@ -135,14 +142,16 @@ class AudioPlayer:
             
             # processes one chunk and return a stereo block, 
             # updating the overlap buffer internally.
-            processed_block = self._process_chunk(chunk)
+            processed_block = self._process_chunk_cf(chunk)
 
             # Put into queue
             try:
                 self.audio_queue.put(processed_block, timeout=1)
             except queue.Full:
-                # If queue is full, skip this block (or handle gracefully)
-                print("Warning!!! Queue is full! Dropping this block")
+                # probably the playback was stopped or paused. in this case we can safely drop the block without notifying
+                if not self.pause_event.is_set() and not self.stop_event.is_set():
+                    # if not we print a warning
+                    print("Warning!!! Queue is full! Dropping this block")
 
             # at end of file add the overlap buffer a final time
             if end_of_file:
@@ -164,22 +173,48 @@ class AudioPlayer:
     def _process_chunk(self, chunk):
         """
         Process a single Ambisonics chunk with overlap-add.
-        This method should maintain self.overlap_buffer and update it.
-        For now, we simulate with random data – replace with your actual processing.
+        This method should maintains `self.overlap_buffer` and updates it.
         """
-        
-        # TAKES AROUND 0.0008 seconds to run or faster
         
         # update our block size
         # using self.blocksize instead. but this may lead to problem? check
         block_size, *_ = chunk.shape
 
         # apply hrtf
-        stereo = self.sh.apply_hrtf_fast(chunk, self.N)
+        stereo = self.sh.apply_hrtf_chunk(chunk, self.N)
+
         # add overlap to stereo output
         stereo[:self.sh_length-1] += self.overlap_buffer
+
         # save new overlap buffer
         self.overlap_buffer[:] = stereo[block_size:block_size + self.sh_length - 1]
+    
+        return stereo[:block_size]
+    
+    # process a single chunk of data, performing an overlap-add algorithm
+    def _process_chunk_cf(self, chunk):
+        """
+        Process a single Ambisonics chunk with overlap-add. and crossfading between old and new stereo input and overlap-add buffer
+        This method should maintains `self.overlap_buffer` and `self.overlap_buffer_old`and updates them.
+        """
+        
+        # update our block size
+        # using self.blocksize instead. but this may lead to problem? check
+        block_size, *_ = chunk.shape
+
+        # apply hrtf
+        stereo, stereo_old = self.sh.apply_hrtf_rot(chunk, self.N)
+
+        # add overlap to stereo output
+        stereo[:self.sh_length-1]     += self.overlap_buffer
+        stereo_old[:self.sh_length-1] += self.overlap_buffer_old
+
+        # save new overlap buffer
+        self.overlap_buffer[:]     =     stereo[block_size:block_size + self.sh_length - 1]
+        self.overlap_buffer_old[:] = stereo_old[block_size:block_size + self.sh_length - 1]
+
+        stereo[:self.cf_length] = (1.0 - self.ramp) * stereo_old[:self.cf_length] + \
+                                          self.ramp * stereo[:self.cf_length]
     
         return stereo[:block_size]
 
@@ -349,7 +384,7 @@ class AudioPlayer:
         # set palying flag to true
         self.play_event.set()
 
-        print(f"Playing from {self.position / self.fs:.2f} seconds...")
+        print(f"Playing from {self.ambi_file.get_current_time()} seconds...")
         self.stream.start()
 
     def _on_stream_finished(self):
@@ -368,7 +403,8 @@ class AudioPlayer:
 
         self.pause_event.set()
         self.play_event.clear()
-        print(f"Paused at {self.position / self.fs:.2f} seconds.")
+        
+        print(f"Paused at {self.ambi_file.get_current_time()} seconds.")
 
     def resume(self):
         """
@@ -384,7 +420,7 @@ class AudioPlayer:
             self.play()
         else:
             self.play_event.set()
-            print(f"Resumed at {self.position / self.fs:.2f} seconds.")
+            print(f"Resumed at {self.ambi_file.get_current_time()} seconds.")
 
     def stop(self, reset_position=True):
         """

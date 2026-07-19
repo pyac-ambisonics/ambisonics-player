@@ -107,7 +107,32 @@ def order_to_channel_n(order: int):
 
     return (order + 1)**2
 
+    
+def hanning_ramp(K: int, n_channels: int = 1) -> np.ndarray:
+    """
+    Hanning (raised cosine) ramp from 0 to 1.
 
+    Parameters
+    -----------
+    K : int
+        The length of the ramp
+    n_channels : int
+        The number of channels the ramp should have (default 1)
+
+    Returns
+    --------
+    numpy.ndarray
+        An array of values ramping up from 0 to 1
+    """
+    if K <= 1:
+        return np.ones(K, dtype=np.float64)
+    i = np.arange(K, dtype=np.float64)
+    
+    ramp = np.empty((K, n_channels), dtype=np.float64)
+    for chan in range(n_channels):
+        ramp[:, chan] = 0.5 * (1.0 - np.cos(i * np.pi / (K - 1)))
+    
+    return ramp
 
 
 
