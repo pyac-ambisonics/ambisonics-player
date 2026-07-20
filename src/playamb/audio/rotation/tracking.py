@@ -1,10 +1,11 @@
 """Head-orientation helpers for the ambisonics player.
 
 This module exposes a small set of reusable components for reading, storing,
-and generating head orientation data. It supports two modes:
+and generating head orientation data. It supports three modes:
 
 * a deterministic demo tracker for testing and presentations, and
 * a hardware tracker adapter built around the `pythonheadtracker` package.
+* a hardware tracker adapter designed to communicate over OSC.
 """
 
 import math
@@ -32,8 +33,8 @@ class Orientation:
             Rotation around the side-to-side axis. The default is 0.
         roll: float, optional
             Rotation around the forward axis. The default is 0.
-        source: string, optional
-            Origin of the measurement, can be `'off'`, `'demo'` or `'hardware'`. The default is `'off'`
+        source: {'off', 'demo', 'hardware', 'osc'}
+            Origin of the measurement. The default is `'off'`
     """
 
     yaw: float = 0.0
@@ -48,7 +49,7 @@ class OrientationState:
         self._lock = threading.Lock()
         self._orientation = Orientation()
 
-    def set(self, yaw=0.0, pitch=0.0, roll=0.0, source="manual"):
+    def set(self, yaw=0.0, pitch=0.0, roll=0.0, source="manual") -> Orientation:
         """
         Store a new orientation and return it as an Orientation() instance.
         
@@ -63,7 +64,7 @@ class OrientationState:
             self._orientation = orientation
         return orientation
 
-    def get(self):
+    def get(self) -> Orientation:
         """Return the most recent orientation snapshot.
         
         Returns
@@ -74,11 +75,6 @@ class OrientationState:
 
         with self._lock:
             return self._orientation
-        
-    #def get_ypr(self):
-    #    _orientation = self.get()
-    #    return [_orientation.yaw, _orientation.pitch, _orientation.roll]
-
 
 class DemoHeadTracker:
     """
@@ -89,7 +85,7 @@ class DemoHeadTracker:
     and the rotation hook.
     """
 
-    def __init__(self, orientation_state, yaw_amplitude=60.0, pitch_amplitude=0.0, period=6.0):
+    def __init__(self, orientation_state: OrientationState, yaw_amplitude=60.0, pitch_amplitude=0.0, period=6.0):
         self.orientation_state = orientation_state
         self.yaw_amplitude = float(yaw_amplitude)
         self.pitch_amplitude = float(pitch_amplitude)
@@ -116,14 +112,12 @@ class DemoHeadTracker:
 
     def stop(self):
         """Stop the demo tracker and the associated thread."""
-
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1)
 
     def is_running(self):
         """Return whether the demo tracker is currently running."""
-
         return self._running
 
     def _tracking_loop(self):
@@ -168,15 +162,23 @@ class HeadTracker:
         self.ht = None
 
     def is_available(self):
-        """Return True when matching MIDI input/output tracker devices are present."""
+        """Return True when matching MIDI input/output tracker devices are present.
+
+        Returns
+        -------
+        bool
+            `:bool:True` when MIDI input/output tracker devices matching "Head Tracker" are available,
+            `:bool:False` otherwise.
+        """
+
         return (any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) 
             and any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_output_names())
         )
 
     def start(
         self,
-        in_device_name=None,
-        out_device_name=None,
+        in_device_name: str=None,
+        out_device_name: str=None,
         refresh_rate=25,
         chirality="preserve"
     ):
@@ -259,7 +261,12 @@ class HeadTracker:
         return self._running
 
 class OSCHeadTracker:
-    """Provides headtracker support for hardware that supports sending data via OSC."""
+    """
+    Provides headtracker support for hardware that supports sending data via OSC.
+    This class has only been tested with the Supperware Head Tracker 1 sending
+    OSC messages via the proprietary Bridghead App. Use with different hardware
+    and OSC interfaces will likely require providing different addresses/ports.
+    """
 
     def __init__(
         self,
@@ -278,19 +285,45 @@ class OSCHeadTracker:
         self._thread = None
         self._client = None
         self._running = False
+        self._last_packet_time = None
 
-    def is_available(self):
-        """Return True when compatible OSC devices are connected."""
-        return True
+    def is_available(self, parsemsg="/yaw,pitch,roll"):
+        """
+        Return 
+        
+        Returns
+        -------
+        bool
+            :bool:`True` when compatible OSC devices are connected and are sending the requested parsing message,
+            :bool:`False` otherwise.
+        """
+
+        if False:
+            try:
+                self.start(parsemsg)
+            except Exception as error:
+                print(error)
+            rtn = self._receiving_packets
+            self.stop()
+            return rtn
+        if self._last_packet_time is None:
+            return False
+
+        return time.monotonic() - self._last_packet_time < 0.5
 
     # start
-    def start(self):
+    def start(self, parsemsg="/yaw,pitch,roll"):
+        """
+        Start an OSC threading server to receive orientation data from the tracker and set up a client to send zeroing messages.
+        Start a new thread to handle the incoming messages.
+        """
+
         if self._running:
             return
         self.zero()
         dispatcher = Dispatcher()
         dispatcher.map(
-            "/yaw,pitch,roll",
+            parsemsg,
             self._handle_orientation
         )
         dispatcher.set_default_handler(
@@ -312,14 +345,21 @@ class OSCHeadTracker:
         self._thread.start()
 
     # receiving
-    def _handle_orientation(self, address, yaw, pitch, roll):#yaw, pitch, roll instead of *args
-        self._running = True
+    def _handle_orientation(self, address, yaw, pitch, roll):
+        """
+        Callback function. Set the current orientation to the values that have just been read.
+        Set `'osc'` as the source. This function will likely require modification for the use
+        with a different hardware, since the angle data coming from the test hardware isn't natively
+        in degrees.
+        """
+        #self._running = True
         self.orientation_state.set(
             - OSCHeadTracker._osc2deg(yaw),
             - OSCHeadTracker._osc2deg(pitch),
             OSCHeadTracker._osc2deg(roll),
             source="osc"
         )
+        self._last_packet_time = time.monotonic()
 
     # zeroing
     def zero(self):
@@ -337,12 +377,14 @@ class OSCHeadTracker:
         self._running = False
         self._thread = None
 
-    def is_running(self):
-        """Return whether the hardware tracking thread is active."""
+    def is_running(self) -> bool:
+        """Return whether the OSC hardware tracking thread is active."""
         return self._running
     
-    def _unknown_packet(address: str, *osc_arguments: List[Any]) -> None:
-        print("Unrecognised OSC message")
+    def _unknown_packet(self, address: str, *osc_arguments: List[Any]) -> None:
+        """Default callback function for unrecognised OSC addresses. Print the address to stdout and set availability flag to false."""
+        print(f"Unrecognised OSC address: {address}")
+        self._last_packet_time = time.monotonic()
 
     @staticmethod
     def _osc2deg(x: float):

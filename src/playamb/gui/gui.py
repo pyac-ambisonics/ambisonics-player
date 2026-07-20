@@ -77,6 +77,7 @@ class AudioPlayerGUI:
         self.demo_tracker = DemoHeadTracker(self.orientation_state, 90)
         self.head_tracker = HeadTracker(self.orientation_state)
         self.osc_tracker = OSCHeadTracker(self.orientation_state)
+        self.osc_tracker.start() # start listening to OSC messages
         self.rotation_tracker = self.demo_tracker
         self.head_tracker_devices = []
         self.midi_error = ""
@@ -608,7 +609,7 @@ class AudioPlayerGUI:
     def refresh_hardware_tracking_status(self, show_message=True):
         self.midi_error = ""
 
-        if self.head_tracker.is_available():
+        if self.head_tracker.is_available() or self.osc_tracker.is_available():
             self.rotation_note.set("Hardware tracking is available")
         else:
             self.rotation_note.set("Hardware tracking is not available. Use Demo mode.")
@@ -1694,6 +1695,7 @@ class AudioPlayerGUI:
 
     def on_close(self):
         self.stop_head_tracking(reset_orientation=False)
+        self.osc_tracker.stop()
         if self.has_player():
             try:
                 self.player.close()
