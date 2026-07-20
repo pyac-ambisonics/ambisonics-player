@@ -385,8 +385,8 @@ class SphericalHarmonics:
                 # a crossfade needs to happen now!
                 self._cf_flag = 2
 
-        # update the last rotation
-        self._last_rotation = rotation
+            # update the last rotation
+            self._last_rotation = rotation
                 
     def interpolate(self, angles_old: Rotation, angles_new: Rotation, block_size=16):
         """
