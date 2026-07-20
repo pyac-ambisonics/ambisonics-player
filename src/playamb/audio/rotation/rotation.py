@@ -13,25 +13,111 @@ from playamb.utils.utils import resolve_path
 
 class RotationMatrix:
     """
-    A class prividing functionality to calculate Wigner-D rotation matrices. The class gives functionality to precalculate a set of
-    Wigner small-d matrices, save them to a file, load that file and calculate Wigner-D matrices based on the precalculated small-d matrices.
-    
-    Copyright (c) 2026 Kylan Klein Lenderink
+    Load and manage Head-Related Transfer Function (HRTF) data with preprocessing.
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files 
-    (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, 
-    publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do 
-    so, subject to the following conditions:
+    This class handles complete HRTF dataset management: loads HRIR/HRTF data 
+    from SOFA files (with fallback to web download), supports resampling, 
+    applies headphone compensation filters, and provides diffuse-field 
+    equalization. Maintains both original unmodified HRIRs and a working 
+    copy that can be modified by filters.
 
-    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    Parameters
+    ----------
+    path : str, pathlib.Path, or None, optional
+        Path to a SOFA file containing HRTF/HRIR data. If None, uses the
+        default FABIAN HRTF dataset (specified by DEFAULT_HRTF_FILE).
+        If loading fails locally, attempts web download. Default is None.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
-    OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE 
-    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
-    IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+    Attributes
+    ----------
+    path : pathlib.Path or None
+        Resolved filesystem path to the loaded SOFA file. None if path
+        could not be resolved.
+    hrirs : pf.Signal
+        Working HRIR signals (may be modified by filters).
+        Shape: (n_directions, n_channels).
+    hrirs_linear : pf.Signal
+        Original unmodified HRIR signals (never modified).
+        Use reset_hrirs() to restore hrirs to this state.
+    sources : np.ndarray
+        Spatial source coordinates (direction/elevation) of HRIR measurements.
+    fs : int
+        Current sampling rate in Hz.
+    hp_list : list of str
+        Available headphone filter names (FABIAN dataset only).
+        Always includes "Diffuse Field Equalization".
+    current_filter : str or None
+        Name of currently applied headphone filter (None if none active).
+    resources : pathlib.Path
+        Path to the application's resources directory.
+    hp_dir : pathlib.Path
+        Path to the Headphones subdirectory containing filter definitions.
+    app_dir : pathlib.Path
+        Root application directory.
+
+    Methods
+    -------
+    resample(fs, truncate=True)
+        Resample HRIRs to a new sampling rate.
+    load_hp_filter(name, min_phase=True, n_samples=512)
+        Load and apply a headphone compensation filter.
+    reset_hrirs()
+        Restore HRIRs to unmodified state.
+    apply_dfe()
+        Apply Diffuse Field Equalization.
+    get_IR_length(linear=False)
+        Get impulse-response length in samples.
+
+    Notes
+    -----
+    - FABIAN HRTF dataset is used by default
+    - Headphone filters are only available if using FABIAN dataset
+    - self.hrirs_linear is always preserved; modifications affect only self.hrirs
+    - Resampling with truncate=True is recommended for real-time performance
+    - DFE and minimum-phase conversions are available for perceptual optimization
+
+    Examples
+    --------
+    >>> hrtf = HRTF()  # Load default FABIAN
+    >>> hrtf.resample(48000)
+    >>> hrtf.load_hp_filter("AKG K701")
+    >>> ir_length = hrtf.get_IR_length()
     """
 
     def __init__(self, path='resources/rotation_matrices/', file='small_d_matrices_0.5deg.npz'):
+        """
+        Initialize rotation matrix calculator by loading pre-computed Wigner small-d matrices.
+        
+        Loads a .npz file containing Wigner small-d matrices for SH orders 0–7 and
+        associated beta angle values. These matrices are queried during real Wigner-D
+        matrix computation to accelerate rotations.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path, optional
+            Directory containing the .npz file. Default is 'resources/rotation_matrices/'.
+        file : str, optional
+            Filename of the .npz archive containing pre-computed matrices.
+            Default is 'small_d_matrices_0.5deg.npz'.
+
+        Attributes
+        ----------
+        small_d : dict
+            Dictionary mapping SH order (int) to small-d matrix arrays.
+        betas_rad : np.ndarray
+            Beta angle values (radians) for which small-d matrices were pre-computed.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the .npz file cannot be found or loaded.
+
+        Notes
+        -----
+        - Pre-computed matrices use 0.5° resolution by default
+        - Coverage: beta ∈ [-180°, 180°]
+        - Orders 0–7 support up to 3rd-order Ambisonics and beyond
+        """
         # our resources folder
         p = Path(path)
         # filename
@@ -51,10 +137,9 @@ class RotationMatrix:
 
         Returns
         ----------
-        d : dict
-            A dictionary containing all preloaded small-d matrices.
-            Key (int) corresponds to SH order.
-            Value is the small-d Matrix.
+        dict
+            Dictionary mapping SH order (int) to small-d matrix arrays.
+            Each value has shape (n_beta_angles, 2*order+1, 2*order+1).
         """
         # load file
         loaded = np.load(file=file)
@@ -147,6 +232,32 @@ class RotationMatrix:
     # Helper: Phi(m, angle) as defined in spharpy
     # possible to precompute!!!
     def _phi(self, m, angle):
+        """
+        Compute the phase factor Phi(m, angle) for real Wigner-D matrix construction.
+        
+        Vectorized computation of the phase function used in real SH rotation:
+        - Phi(m=0, angle) = 1
+        - Phi(m>0, angle) = sqrt(2) * cos(m * angle)
+        - Phi(m<0, angle) = -sqrt(2) * sin(|m| * angle)
+
+        Parameters
+        ----------
+        m : np.ndarray
+            Magnetic quantum number(s), can be positive, negative, or zero.
+        angle : float
+            Angle in radians (alpha or gamma in Euler Z-Y-Z convention).
+
+        Returns
+        -------
+        np.ndarray
+            Phase factor values matching the shape of m.
+
+        Notes
+        -----
+        - Vectorized for efficient computation over all m values at once
+        - Used internally by real_wigner_d_matrix()
+        - Part of Blanco's real Wigner-D formula implementation
+        """
         # vectorized version for 1D arrays
         out = np.zeros_like(m, dtype=np.float64)
         mask_pos = m > 0
@@ -159,20 +270,31 @@ class RotationMatrix:
 
     def _query_small_d(self, N: int, beta: float) -> np.ndarray:
         """
-        Gets the small_d value from the precalculated and loaded file. The beta value closest to the 
-        next available precalculated beta is used.
+        Query the nearest pre-computed small-d matrix for a given order and angle.
+        
+        Uses binary search to find the pre-computed beta value closest to the
+        requested angle, then returns the corresponding small-d matrix. This
+        avoids expensive re-computation during rotation.
 
         Parameters
         ----------
         N : int
-            The ambisonics/SH order for the queried wigner small-d matrix.
+            SH order (0–7) for which to retrieve the small-d matrix.
         beta : float
-            The Euler beta angle in radians.
+            Rotation angle (radians) for which the nearest pre-computed 
+            matrix is desired.
 
         Returns
-        ---------
-        d : np.NDArray 
-            The wigner small-d array approximately corresponding to the given beta value.
+        -------
+        np.ndarray
+            Small-d matrix with shape (2*N+1, 2*N+1).
+
+        Notes
+        -----
+        - Uses binary search for O(log n) lookup time
+        - Selects the nearest pre-computed beta (no interpolation)
+        - Handles edge cases: beta < min_beta or beta > max_beta
+        - Default pre-computation uses 0.5° resolution
         """
         # local copy of the small_d matrix corresponding to this order
         sd = self.small_d[N]
@@ -196,17 +318,42 @@ class RotationMatrix:
     @staticmethod
     def create_small_d_matrices_file(file: Path, step=0.5, sh_order=7):
         """
-        This function creates a set of Wigner small-d matrices for all possible beta values (0-360°) per order up to 
-        the given order sh_order (7 is default). The stepsize of the betavalue can be changed. A valid filepath must be given.
+        Pre-compute and cache Wigner small-d matrices for all beta angles and SH orders.
+
+        Generates a comprehensive .npz cache file containing small-d matrices at
+        regularly-spaced beta angles for orders 0 through sh_order. This is a
+        one-time computation; the resulting file enables O(1) matrix lookups
+        during real-time rotation operations.
 
         Parameters
         ----------
-        file : Path
-            Path to the file to write the small-d amtrices to
+        file : pathlib.Path
+            Output filepath for the compressed .npz cache. Must have write permissions.
         step : float, optional
-            Stepsize in degrees of the betavalues. Default is 0.5
+            Angular resolution in degrees of pre-computed beta values.
+            Minimum 0.1°. Default is 0.5° (721 angles from -180° to 180°).
         sh_order : int, optional
-            The maximum SH/Ambisonics order to calculate small-d matrices for. Default is 7.
+            Maximum SH order to compute matrices for (0 to sh_order inclusive).
+            Default is 7 (supports 3rd-order Ambisonics and higher).
+
+        Returns
+        -------
+        None
+            Writes compressed .npz file to disk.
+
+        Notes
+        -----
+        - Computation may take 1–10 seconds depending on step size and order
+        - Output file size: ~50–100 MB for 0.5° resolution, order 7
+        - Beta angle range: [-180°, 180°] (equivalent to [0°, 360°])
+        - Call this method once; load result via __init__() thereafter
+        - Pre-computed matrices are exact; no interpolation used during lookup
+
+        Examples
+        --------
+        >>> from pathlib import Path
+        >>> cache_file = Path('small_d_matrices_0.5deg.npz')
+        >>> RotationMatrix.create_small_d_matrices_file(cache_file, step=0.5, sh_order=7)
         """
         # create angles with specific step size
         # step can never be smaller than 1 degree

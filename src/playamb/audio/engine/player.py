@@ -253,9 +253,10 @@ class AudioPlayer:
                 try:
                     data = self.audio_queue.get_nowait()
                 except queue.Empty:
-                     # Underflow: not enough processed audio ready: output 0's
-                     outdata[:] = out * self.gain
-                     return
+                    print("Audio queue underrun: outputting silence")
+                    # Underflow: not enough processed audio ready: output 0's
+                    outdata[:] = out * self.gain
+                    return
                 
                 # we set data = None in our _process_loop() if we reached the end of file to signal playback has ended
                 if data is None:

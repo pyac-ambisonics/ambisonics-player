@@ -17,53 +17,156 @@ from playamb.utils.utils import hanning_ramp
 
 class SphericalHarmonics:
     """
-    Convert HRTFs into spherical-harmonic domain and apply rotations.
+    Real-time binaural renderer using spherical-harmonic HRTF decomposition.
 
-    This class uses an HRTF dataset (SOFA), converts HRIRs to
-    spherical-harmonic coefficients for a given Ambisonic order, and provides
-    rotation + interpolation utilities and a fast HRTF application method.
+    This class manages the complete pipeline for head-tracked binaural audio:
+    loads an HRTF dataset, decomposes HRIRs into spherical-harmonic coefficients,
+    performs head-rotation transformations via Wigner-D matrices, and applies
+    fast frequency-domain convolution with overlap-add buffering and smooth
+    crossfading during rotation transitions.
 
     Parameters
     ----------
-    hrtf : Tuple or None.
-        Tuple containing (pyfar.Signal, array_like) containing the signal and sources of
-        the HRTF dataset, or None. If None, the FABIAN dataset is downloaded.
-    sampling_rate : int
-        Target sampling rate in Hz for HRIR resampling (default 48000).
-    ambi_order : int
-        Ambisonic order to use for spherical-harmonic decomposition.
+    hrtf : HRTF or None, optional
+        Preloaded HRTF instance. If None, the default FABIAN HRTF is loaded.
+        Default is None.
+    sampling_rate : int or float, optional
+        Target sampling rate in Hz. HRTF resampling is automatic if needed.
+        Default is 44100.
+    ambi_order : int, optional
+        Ambisonic order (0–7) for spherical-harmonic decomposition.
+        Default is 1 (first-order).
+    preprocess : str, optional
+        Preprocessing algorithm: 'LS' (Least Squares), 'MagLS' (recommended),
+        'TA', or 'BiMagLS'. Default is 'MagLS'.
+    block_size : int, optional
+        Audio block size in samples. If None, auto-set to next power of two
+        greater than IR length. Default is None.
 
     Attributes
     ----------
-    hrirs : HRTF
-        Loaded HRIRs (time-domain).
-    sources : array_like
-        Source coordinates corresponding to `hrirs`.
-    spherical_harmonics : spharpy.SphericalHarmonics
-        Computed spherical-harmonic basis and inverse.
-    hrirs_nm : spharpy.SphericalHarmonicSignal
-        HRIRs expressed in spherical-harmonic domain.
-    rotation : spharpy.transforms.SphericalHarmonicRotation
-        Current rotation transform (can be updated with `set_rotation`).
+    hrtf : HRTF
+        Loaded HRTF dataset instance.
+    sampling_rate : int
+        Current sampling rate in Hz.
+    ambi_order : int
+        Current Ambisonic order.
+    sources : spharpy.SamplingSphere
+        HRTF spatial sampling grid.
+    hrir_nm : np.ndarray
+        Spherical-harmonic HRIR coefficients (time domain).
+        Shape: (2, n_sh_channels, n_samples).
+    hrir_nm_fft : np.ndarray
+        Zero-padded FFT of spherical-harmonic HRIRs for convolution.
+        Shape: (2, n_sh_channels, n_freq_bins).
+    hrir_nm_rot : dict
+        Current and previous rotated SH-HRIR spectra with keys 'old' and 'new'.
+    block_size : int
+        Audio processing block size in samples.
+    N : int
+        FFT length for overlap-add (>= block_size + IR_length - 1).
+    overlap_buffer : np.ndarray
+        Tail from last block for overlap-add continuity. Shape: (IR_length-1, 2).
+    overlap_buffer_old : np.ndarray
+        Tail from previous rotation filter during crossfade.
+    pre_gain : float
+        Output gain multiplier (default 0.1).
+    atol : float
+        Rotation tolerance in radians for skipping negligible updates (default ≈ 1°).
+
+    Notes
+    -----
+    - A daemon thread manages asynchronous rotation updates (see _rotation_worker)
+    - Uses SN3D normalization and real spherical harmonics (AmbiX convention)
+    - Crossfade ramp: 32-sample equal-power sine² curve
+    - Call close() before object destruction to cleanly terminate the rotation thread
+    - Thread-safe rotation updates via queue and locks
+    - Supports smooth head-rotation transitions with zero audio clicks
+
+    Examples
+    --------
+    >>> sh = SphericalHarmonics(ambi_order=3, sampling_rate=48000)
+    >>> for chunk in ambi_stream:
+    ...     sh.set_rotation([yaw, pitch, roll])  # Non-blocking queue
+    ...     output = sh.process_ola_rot(chunk)
+    ...     play(output)
+    >>> sh.close()
     """
 
     # Constructor
     def __init__(self, hrtf: HRTF = None, sampling_rate=44_100, ambi_order=1, preprocess='MagLS', block_size=None):
-        """Initialize spherical-harmonic HRTF processing. 
-        This blocks and will take a considerable time to finish processing.
+        """
+        Initialize spherical-harmonic HRTF processing and convolution engine.
+        
+        This constructor loads or receives an HRTF dataset, converts HRIRs to
+        spherical-harmonic coefficients for the given Ambisonic order, and
+        initializes the real-time convolution pipeline with overlap-add buffers,
+        rotation matrices, and a background rotation worker thread. This call is
+        blocking and may take considerable time (typically several seconds).
 
         Parameters
-        -----------
+        ----------
         hrtf : HRTF or None, optional
-            Preloaded HRTF instance. If None, a default dataset is loaded.
+            Preloaded HRTF instance. If None, the default FABIAN HRTF dataset
+            is downloaded and loaded. Default is None.
         sampling_rate : int or float, optional
-            Target sampling rate in Hz for HRIR resampling. Default is 48000.
+            Target sampling rate in Hz for HRIR resampling. The HRTF will be
+            resampled if its native sampling rate differs. Default is 44100.
         ambi_order : int, optional
-            Ambisonic order used for the spherical-harmonic decomposition.
-        prepocess : str, optional
-            Preprocessing algorithm to use on HRTF. Currently LS and MagLS are implemented. MagLS is default
+            Ambisonic order (0, 1, 2, ..., 7) for spherical-harmonic 
+            decomposition. Higher orders require more computation but provide
+            better directional accuracy. Default is 1 (first-order Ambisonics).
+        preprocess : str, optional
+            Preprocessing algorithm for HRTF conversion. Currently supported:
+            'LS' (Least Squares), 'MagLS' (Magnitude Least Squares, recommended),
+            'TA' (not yet implemented), 'BiMagLS' (not yet implemented).
+            Default is 'MagLS'.
         block_size : int, optional
-            This sets the block size of the audio blocks we expect to process. Necessary for correct OLA performance!
+            Audio processing block size in samples. Must match the buffer size
+            used in real-time playback for correct overlap-add convolution.
+            If None, automatically set to the next power of two greater than
+            the HRIR length. Default is None.
+
+        Attributes
+        ----------
+        hrtf : HRTF
+            Loaded HRTF instance.
+        sampling_rate : int
+            Current sampling rate in Hz.
+        ambi_order : int
+            Current Ambisonic order.
+        sources : spharpy.SamplingSphere
+            Spatial sampling points of the HRTF measurement directions.
+        hrir_nm : np.ndarray
+            Spherical-harmonic coefficients of HRIRs in time domain.
+        hrir_nm_fft : np.ndarray
+            FFT of zero-padded spherical-harmonic HRIRs (for convolution).
+        hrir_nm_rot : dict
+            Current rotated SH-HRIRs in frequency domain with keys 'old' and 'new'.
+        block_size : int
+            Audio processing block size in samples.
+        N : int
+            FFT length for overlap-add (>= block_size + IR_length - 1).
+        overlap_buffer : np.ndarray
+            Tail samples from last convolution (shape: (IR_length-1, 2)).
+        overlap_buffer_old : np.ndarray
+            Tail samples from previous rotation filter state.
+        pre_gain : float
+            Overall gain factor applied to all output (default 0.1).
+
+        Raises
+        ------
+        Exception
+            If HRTF loading (from file and web) both fail.
+
+        Notes
+        -----
+        - A daemon thread (_rotation_worker) is started for asynchronous head
+        rotation updates; terminate via close() before object destruction
+        - Uses SN3D normalization and real spherical harmonics (AmbiX convention)
+        - Crossfade ramp length is fixed at 32 samples by default
+        - Default tolerance for rotation changes: 1 degree (radians)
+        - Equal-power sine-squared ramps ensure smooth audio during transitions
         """
         start = time.time()
         
@@ -159,9 +262,8 @@ class SphericalHarmonics:
         self.N = next_power_of_two(self.get_IR_length() + block_size - 1)
 
         # prepare ramp for crossfading between rotations
-        self._cf_length = 32
-        self._ramp = hanning_ramp(self._cf_length, 2)
         self._cf_flag = 0
+        self._set_crossfade_length(32)
 
         # use this function because we will not calculate D otherwise
         self.update_rotation_matrix([0, 0, 0])
@@ -172,8 +274,24 @@ class SphericalHarmonics:
 
     def update_order(self, order: int, block_size=None):
         """
-        Updates the order of the Spherical Harmonics object. Recalculates a bunch of the internal variables. 
-        This call blocks and will take a considerable time to finish processing.
+        Update the Ambisonic order and recompute all spherical-harmonic components.
+        
+        This method recalculates the spherical-harmonic basis, performs preprocessing
+        on the HRIRs for the new order, and updates all internal FFT buffers and 
+        rotation matrices. This call is blocking and may take considerable time.
+
+        Parameters
+        ----------
+        order : int
+            New Ambisonic order for spherical-harmonic decomposition.
+        block_size : int, optional
+            Audio processing block size in samples. If None, automatically computed 
+            as the next power of two greater than IR length. Default is None.
+
+        Raises
+        ------
+        ValueError
+            If order is negative.
         """
         # create a spherical harmonics definition, corresponding to the AmbiX convention
         self.ambi_order = order
@@ -222,8 +340,10 @@ class SphericalHarmonics:
 
         # update our sh fft coefficients once (and on each rotation update)
         self.update_hrirs_fft(self.N)
+        self.update_rotation_matrix(self._last_rotation.as_euler('zyx', degrees=True))
 
-        self._cf_length = 16
+        self._set_crossfade_length(32)
+        self._ramp = hanning_ramp(self._cf_length, 2)
         # allocate buffers
         self.overlap_buffer = np.zeros((self.get_IR_length() - 1, 2), dtype=np.float32)
         self.overlap_buffer_old = np.zeros_like(self.overlap_buffer)
@@ -242,7 +362,16 @@ class SphericalHarmonics:
     
     def restart_rotation(self):
         """
-        Closes the possibly still running rotation thread, then creates a new rotation thread and starts it.
+        Terminate the current rotation thread and start a new one.
+        
+        This method safely closes any existing rotation worker thread, clears
+        synchronization flags, and spawns a fresh daemon thread. Use this after
+        major configuration changes or when rotation state needs to be reset.
+
+        Raises
+        ------
+        Exception
+            If the existing rotation thread cannot be terminated within 1 second.
         """
         # close old rotation thread if it exists and is alive
         if self._rotation_thread is not None:
@@ -301,7 +430,8 @@ class SphericalHarmonics:
             # self.overlap_buffer[:] = 0.0
 
             # a crossfade needs to happen now!
-            self._cf_flag = 2
+            self._cf_flag = 1
+            self._cf_pos = 0
 
     def set_rotation(self, angles, convention='zyx'):
         """
@@ -332,7 +462,20 @@ class SphericalHarmonics:
 
     def _rotation_worker(self):
         """
-        A function continously updating the Wigner-D matrix. Called in a seperate thread from __init__
+        Worker thread for asynchronous Wigner-D matrix updates.
+        
+        This method runs continuously in a separate daemon thread, waiting for
+        rotation update requests from the queue. When a rotation is received,
+        it computes the real Wigner-D matrix, applies it to the frequency-domain
+        HRIRs, and updates the filter state in a thread-safe manner with proper
+        synchronization for crossfade transitions.
+
+        Notes
+        -----
+        - Runs as a daemon thread started in __init__
+        - Monitors self._rotation_update event and self._stop_rotation_thread flag
+        - Skips negligible rotations (< self.atol tolerance)
+        - Triggers crossfade when filter state changes via self._cf_flag
         """
         while not self._stop_rotation_thread.is_set():
 
@@ -380,15 +523,26 @@ class SphericalHarmonics:
                 # self.overlap_buffer[:] = 0.0
 
                 # a crossfade needs to happen now!
-                self._cf_flag = 2
+                self._cf_flag = 1
+                self._cf_pos = 0
 
             # update the last rotation
             self._last_rotation = rotation
 
     def get_rotation_matrix(self):
         """
-        Returns a copy fo the currently stored Wigner D matrix in a thread safe manner.
-        Returns None if no rotation matrix is available.
+        Return a copy of the currently stored Wigner-D rotation matrices.
+        
+        Retrieves both the 'old' and 'new' Wigner-D matrices in a thread-safe
+        manner (holding the rotation lock). This allows safe access to the
+        current and previous filter rotations during interpolation.
+
+        Returns
+        -------
+        dict or None
+            Dictionary with keys 'old' and 'new', each containing a Wigner-D
+            matrix of shape ((order+1)^2, (order+1)^2). Returns None if no
+            rotation matrix is available.
         """
         with self._rotation_lock:
             if self._D is None:
@@ -399,9 +553,19 @@ class SphericalHarmonics:
     # set the current rotation angle
     def _apply_rotation(self):
         """
-        Applies rotation to to the base SH coefficients in frequency domain. Thus, the already zero-padded
-        signal is used, because that is what the frequency domain data is based on. Updates the internal state
-        of hrir_nm_rot. 
+        Apply rotation matrices to the frequency-domain HRIR coefficients.
+        
+        Multiplies the zero-padded frequency-domain spherical-harmonic HRIRs
+        by the current and previous (for crossfade) Wigner-D rotation matrices
+        using efficient matrix-vector products. Updates self.hrir_nm_rot['old']
+        and self.hrir_nm_rot['new'].
+
+        Notes
+        -----
+        - Operates in frequency domain (self.hrir_nm_fft already zero-padded)
+        - Matrix operation: (SH channels, SH order, FFT bins)
+        - Used internally during overlap-add processing
+        - Thread-safe via rotation lock
         """
         # using the fft, since we expect this to be faster than time domain
         # 3. Apply rotation
@@ -561,28 +725,32 @@ class SphericalHarmonics:
     # apply the hrtf data to an ambisonics file
     def apply_hrtf_chunk_rot(self, ambi_signal: np.ndarray, block_size=1024):
         """
-        Convolve an ambisonic signal chunk with the rotated HRTFs in the frequency domain to produce an fft for smoother rotation crossfade in frequency domain.
-        This function expects
+        Convolve an Ambisonic signal chunk with rotated HRTFs for crossfade.
+        
+        Performs frequency-domain convolution of the input Ambisonic signal
+        with both the old and new rotated HRTF filters, enabling smooth
+        crossfading during head-rotation transitions. Returns both results
+        plus a flag indicating whether a crossfade is in progress.
 
         Parameters
         ----------
         ambi_signal : np.ndarray
-            Input block or stream (should have shape (n_samples, n_channels)).
+            Input audio block with shape (n_samples, n_channels).
         block_size : int, optional
             FFT size / processing block length. Default 1024.
-        gain : float, optional
-            A float between 0. and 1., applied after internal gain-staging, Default is 1.
 
         Returns
         -------
-        numpy.ndarray, numpy.ndarray, bool
-            2x Stereo time-domain array (n_samples, 2) after convolution and gain staging.
-            once for old rotation, once for new rotation.
-            If a crossfade is required, bool will be True
+        tuple[np.ndarray, np.ndarray, bool]
+            - stereo_new : Binaural output using new rotation (n_samples, 2)
+            - stereo_old : Binaural output using old rotation (n_samples, 2)
+            - do_fade : Boolean flag; True if crossfade is active
 
         Notes
-        -------------
-        Assumes self.hrirs_nm_fft has been prepared via update_hrirs_fft(block_size).
+        -----
+        - Requires self.hrir_nm_fft to be pre-computed via update_hrirs_fft()
+        - Used internally by process_ola_rot() for rotation transitions
+        - Thread-safe snapshot of rotation matrices taken under lock
         """
     
         # checking of channel count should be done elsewhere
@@ -606,9 +774,7 @@ class SphericalHarmonics:
         with self._rotation_lock:
             hrir_new = self.hrir_nm_rot['new'].copy()
             hrir_old = self.hrir_nm_rot['old'].copy()
-            do_fade = self._cf_flag
-            # Consume the flag so it doesn't fire again on the next block
-            self._cf_flag -=1
+            do_fade = self._cf_flag > 0
 
         for ear in range(2):
             # perform convolution in rotated frequency domain and sum in frequency domain
@@ -629,8 +795,29 @@ class SphericalHarmonics:
     # process a single chunk of data, performing an overlap-add algorithm
     def process_ola(self, chunk: np.ndarray):
         """
-        Process a single Ambisonics chunk with overlap-add.
-        This method should maintains `self.overlap_buffer` and updates it.
+        Process a single Ambisonic audio chunk using overlap-add convolution.
+        
+        Applies rotated HRTFs via frequency-domain convolution, combines with
+        the overlap buffer from the previous chunk, and returns the valid 
+        (non-overlapped) portion of the result. Maintains self.overlap_buffer
+        for the next chunk.
+
+        Parameters
+        ----------
+        chunk : np.ndarray
+            Ambisonic input block with shape (n_samples, n_channels).
+
+        Returns
+        -------
+        np.ndarray
+            Stereo binaural output with shape (n_samples, 2), derived from 
+            the convolution result after overlap-add.
+
+        Notes
+        -----
+        - IR length (self.get_IR_length()) must be <= block size
+        - self.overlap_buffer is updated in-place for continuity
+        - Does not perform crossfading; use process_ola_rot() during head rotations
         """
         # update our block size and sh_length
         block_size, *_ = chunk.shape
@@ -651,8 +838,30 @@ class SphericalHarmonics:
 
     def process_ola_rot(self, chunk: np.ndarray):
         """
-        Process a single Ambisonics chunk with overlap-add. and crossfading between old and new stereo input and overlap-add buffer
-        This method maintains `self.overlap_buffer` and `self.overlap_buffer_old`and updates them.
+        Process an Ambisonic chunk with overlap-add and smooth rotation crossfade.
+        
+        Convolves the input with both old and new rotated filters, performs
+        separate overlap-add for each, and applies a crossfade ramp between
+        them as the head rotation occurs. Maintains both overlap_buffer and
+        overlap_buffer_old to support smooth transitions.
+
+        Parameters
+        ----------
+        chunk : np.ndarray
+            Ambisonic input block with shape (n_samples, n_channels).
+
+        Returns
+        -------
+        np.ndarray
+            Stereo binaural output with shape (n_samples, 2). During crossfade
+            windows, this blends the old and new filter outputs.
+
+        Notes
+        -----
+        - Called during head-rotation transitions via set_rotation()
+        - Manages self._cf_flag, self._cf_pos, and self._ramp for fade control
+        - Thread-safe access to rotation matrices and crossfade state
+        - Reverts to process_ola() behavior once crossfade completes
         """
 
         # update our block size and sh_length
@@ -663,24 +872,72 @@ class SphericalHarmonics:
         stereo_new, stereo_old, do_fade = self.apply_hrtf_chunk_rot(chunk, self.N)
 
         # take care of our overlap-adds before crossfading
-        stereo_new[:sh_length-1] += self.overlap_buffer       # only new filter's tail
-        stereo_old[:sh_length-1] += self.overlap_buffer_old   # only old filter's tail
+        stereo_new[:sh_length-1] += self.overlap_buffer
+        stereo_old[:sh_length-1] += self.overlap_buffer_old
 
+        fade_finished = not do_fade
 
-        if do_fade > 0:
-            # do crossfade
-            stereo_new[:self._cf_length] = (1.0 - self._ramp) * stereo_old[:self._cf_length] + \
-                                               self._ramp * stereo_new[:self._cf_length]
+        if do_fade:
+            with self._rotation_lock:
+                # do crossfade
+                fade_start = self._cf_pos
+                fade_end = min(fade_start + block_size, self._cf_length)
+                fade_n = max(0, fade_end - fade_start)
+
+            if fade_n > 0:
+                ramp = self._ramp[fade_start:fade_end]
+                stereo_new[:fade_n] = (1.0 - ramp) * stereo_old[:fade_n] + ramp * stereo_new[:fade_n]
+                self._cf_pos = fade_end
+
+            with self._rotation_lock:
+                # Do not overwrite a newly started fade from the worker thread.
+                if self._cf_pos == fade_start:
+                    self._cf_pos = fade_end
+
+                    if self._cf_pos >= self._cf_length:
+                        self._cf_flag = 0
+                        self._cf_pos = 0
+                        fade_finished = True
+                    else:
+                        fade_finished = False
+                else:
+                    # A newer rotation was published during this audio block.
+                    # Its fade will begin during the next block.
+                    fade_finished = False
+        
+        else:
+            self._cf_pos = 0
             
+        # Save the current/new filter tail for the next block.
+        new_tail = stereo_new[block_size:block_size + sh_length - 1].copy()
+        old_tail = stereo_old[block_size:block_size + sh_length - 1].copy()
+        
         # extract tails for the next block
-        self.overlap_buffer = stereo_new[block_size:block_size + sh_length - 1]
-        self.overlap_buffer_old = stereo_old[block_size:block_size + sh_length - 1]
+        self.overlap_buffer[:] = new_tail
+        
+        if fade_finished:
+            # The active decoder is now the new filter. Its history must also
+            # become the "old" history used at the next rotation transition.
+            self.overlap_buffer_old[:] = new_tail
+        else:
+            # A fade is still active, so retain both independent OLA states.
+            self.overlap_buffer_old[:] = old_tail
                 
         return stereo_new[:block_size]
         
 
     def flush(self) -> np.ndarray:
-        """Return the final M-1 tail samples after the last chunk."""
+        """
+        Retrieve final tail samples after processing the last audio chunk.
+        
+        Returns the remaining M-1 samples (where M is the IR length) stored
+        in the overlap buffer, which must be output to complete the stream.
+
+        Returns
+        -------
+        np.ndarray
+            Tail of the last convolution result with shape (IR_length-1, 2).
+        """
         return self.overlap_buffer.copy()
 
     # updates our hrirs_nm_fft by zero-padding the time signal so the resulting fft has the correct length for convolution
@@ -700,7 +957,16 @@ class SphericalHarmonics:
 
     def close(self):
         """
-        Cleans up this file so it can close correctly
+        Clean up and terminate the rotation worker thread.
+        
+        Sets stop and update flags, joins the rotation thread with a 1-second
+        timeout, and prints a warning if the thread does not terminate cleanly.
+        Call this before destroying the SphericalHarmonics instance.
+
+        Notes
+        -----
+        - Thread join timeout is 1.0 second
+        - Safe to call multiple times
         """
         self._stop_rotation_thread.set()
         self._rotation_update.set()
@@ -751,3 +1017,35 @@ class SphericalHarmonics:
             The tolerance in degrees.
         """
         self.atol = np.deg2rad(atol)
+
+    def _set_crossfade_length(self, length: int) -> None:
+        """
+        Configure the sample-accurate equal-power crossfade ramp length.
+        
+        Creates an equal-power sine-squared ramp (starting at 0, ending at 1)
+        of the specified sample length. The ramp is independent of audio block
+        size and used for smooth transitions during head rotations.
+
+        Parameters
+        ----------
+        length : int
+            Crossfade duration in samples (must be >= 2).
+
+        Raises
+        ------
+        ValueError
+            If length < 2.
+
+        Notes
+        -----
+        - Ramp phase: sin²(phase) where phase ∈ [0, π/2]
+        - Equal-power property ensures constant total energy during fade
+        - Stored in self._ramp and used by process_ola_rot()
+        """
+        if length < 2:
+            raise ValueError("Crossfade length must be at least two samples.")
+
+        self._cf_length = int(length)
+        phase = np.linspace(0.0, np.pi / 2.0, self._cf_length)
+        self._ramp = np.sin(phase) ** 2
+        self._cf_pos = 0

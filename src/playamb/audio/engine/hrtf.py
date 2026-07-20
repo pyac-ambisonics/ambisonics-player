@@ -9,38 +9,103 @@ from playamb.utils.utils import resolve_path, DEFAULT_HRTF_FILE
 
 class HRTF:
     """
-    Helper for loading Head-Related Transfer Function (HRTF) data.
+    Load and manage Head-Related Transfer Function (HRTF) data with preprocessing.
 
-    This class attempts to load HRIR/HRTF data from a local SOFA file given
-    by `path`. If loading from the local file fails, it will attempt to
-    download a default HRTF from the web.
+    This class handles complete HRTF dataset management: loads HRIR/HRTF data 
+    from SOFA files (with fallback to web download), supports resampling, 
+    applies headphone compensation filters, and provides diffuse-field 
+    equalization. Maintains both original unmodified HRIRs and a working 
+    copy that can be modified by filters.
+
+    Parameters
+    ----------
+    path : str, pathlib.Path, or None, optional
+        Path to a SOFA file containing HRTF/HRIR data. If None, uses the
+        default FABIAN HRTF dataset (specified by DEFAULT_HRTF_FILE).
+        If loading fails locally, attempts web download. Default is None.
 
     Attributes
     ----------
     path : pathlib.Path or None
-        Path to the SOFA file used to load the HRTF. `None` if the provided
-        path could not be parsed.
-    hrirs : pyfar.Signal
-        Loaded HRIR signals
-    sources : ndarray
-        Source coordinate array associated with `hrirs`.
+        Resolved filesystem path to the loaded SOFA file. None if path
+        could not be resolved.
+    hrirs : pf.Signal
+        Working HRIR signals (may be modified by filters).
+        Shape: (n_directions, n_channels).
+    hrirs_linear : pf.Signal
+        Original unmodified HRIR signals (never modified).
+        Use reset_hrirs() to restore hrirs to this state.
+    sources : np.ndarray
+        Spatial source coordinates (direction/elevation) of HRIR measurements.
+    fs : int
+        Current sampling rate in Hz.
+    hp_list : list of str
+        Available headphone filter names (FABIAN dataset only).
+        Always includes "Diffuse Field Equalization".
+    current_filter : str or None
+        Name of currently applied headphone filter (None if none active).
+    resources : pathlib.Path
+        Path to the application's resources directory.
+    hp_dir : pathlib.Path
+        Path to the Headphones subdirectory containing filter definitions.
+    app_dir : pathlib.Path
+        Root application directory.
+
+    Methods
+    -------
+    resample(fs, truncate=True)
+        Resample HRIRs to a new sampling rate.
+    load_hp_filter(name, min_phase=True, n_samples=512)
+        Load and apply a headphone compensation filter.
+    reset_hrirs()
+        Restore HRIRs to unmodified state.
+    apply_dfe()
+        Apply Diffuse Field Equalization.
+    get_IR_length(linear=False)
+        Get impulse-response length in samples.
+
+    Notes
+    -----
+    - FABIAN HRTF dataset is used by default
+    - Headphone filters are only available if using FABIAN dataset
+    - self.hrirs_linear is always preserved; modifications affect only self.hrirs
+    - Resampling with truncate=True is recommended for real-time performance
+    - DFE and minimum-phase conversions are available for perceptual optimization
+
+    Examples
+    --------
+    >>> hrtf = HRTF()  # Load default FABIAN
+    >>> hrtf.resample(48000)
+    >>> hrtf.load_hp_filter("AKG K701")
+    >>> ir_length = hrtf.get_IR_length()
     """
 
     def __init__(self, path=None):
         """
-        Initialize an `HRTF` instance and load HRTF data. Initialize a list of available headphone
-        filters. 
+        Initialize an HRTF instance and load HRTF data from file or web.
+        
+        Attempts to load Head-Related Transfer Function (HRTF) data from the
+        provided SOFA file path. On failure, falls back to downloading the
+        default FABIAN HRTF dataset from the internet. Also initializes the
+        list of available headphone compensation filters.
 
         Parameters
         ----------
-        path : str or pathlib.Path
-            Path or path-like object pointing to a SOFA file to load.
+        path : str, pathlib.Path, or None, optional
+            Path to a SOFA file containing HRTF/HRIR data. If None, uses
+            the default FABIAN HRTF path specified by DEFAULT_HRTF_FILE.
+            Default is None.
+
+        Raises
+        ------
+        Exception
+            If both local and web loading fail (propagated from load_HRTF).
 
         Notes
         -----
-        The constructor will attempt to load the HRTF from the provided
-        `path`. On failure it will try to download a default HRTF from the
-        internet using `load_hrtf_from_web()`.
+        - self.hrirs_linear stores the unmodified original HRIRs
+        - self.hrirs can be modified by load_hp_filter() or reset via reset_hrirs()
+        - Available headphone filters are stored in self.hp_list
         """
         self.app_dir = Path(__file__).resolve().parent.parent.parent.parent
         if path is None:    
@@ -70,15 +135,25 @@ class HRTF:
 
     def resample(self, fs, truncate=True):
         """
-        Resample the HRTF to the given samplerate. This will truncate the HRTF by default on upsampling!
+        Resample the HRTF data to a target sampling rate.
+        
+        Resamples both self.hrirs and self.hrirs_linear to match the target
+        sampling rate. By default, truncates on upsampling to maintain the
+        original sample count for performance.
 
         Parameters
         ----------
-        fs : int
-            The samplerate to resample to
+        fs : int or float
+            Target sampling rate in Hz.
         truncate : bool, optional
-            Determines if the Signal should be truncated to it's original sample count if 
-            sample count is more than ebfore after upsampling
+            If True and upsampling increases sample count, truncate the signal
+            back to its original length using a fade-out window. Default is True.
+
+        Notes
+        -----
+        - Uses pyfar's resample with 'freq' amplitude matching
+        - Truncation applies a right-side kaiser(8) window fade
+        - self.fs is updated to reflect the new sampling rate
         """
 
         if fs != self.fs:
@@ -88,15 +163,30 @@ class HRTF:
 
     def _resample_save(self, signal: pf.Signal, fs, truncate=True):
         """
-        Resample the given signal to the given samplerate. This will truncate the signal by default on upsampling!
+        Resample a pyfar Signal to a target rate with optional truncation.
+        
+        Internal helper that resamples a single pyfar Signal and optionally
+        truncates it back to its original sample count to manage file size.
 
         Parameters
         ----------
-        fs : int
-            The samplerate to resample to
+        signal : pf.Signal
+            Input signal to resample.
+        fs : int or float
+            Target sampling rate in Hz.
         truncate : bool, optional
-            Determines if the Signal should be truncated to it's original sample count if 
-            sample count is more than before after upsampling
+            If True and upsampling occurs, trim the signal to its original
+            length using a kaiser-windowed fade. Default is True.
+
+        Returns
+        -------
+        pf.Signal
+            Resampled (and possibly truncated) signal.
+
+        Notes
+        -----
+        - Helper for resample() method
+        - Truncation uses a right-side fade to blend the edge smoothly
         """
         # current samplecount
         n_samples = signal.n_samples
@@ -126,18 +216,24 @@ class HRTF:
 
     def get_IR_length(self, linear=False):
         """
-        Return the number of samples in the loaded HRIRs.
+        Return the impulse-response length in samples of the loaded HRIRs.
 
         Parameters
-        ------------
-        lineaer : bool, optional
-            If linear is True, the samplelength of the linear HRIR will be returned, isntead of the filtered HRIR.
-            Default is False.
+        ----------
+        linear : bool, optional
+            If True, return the sample count of the original unmodified HRIRs
+            (self.hrirs_linear). If False, return the count for the current
+            (possibly filtered) HRIRs. Default is False.
         
         Returns
-        -------------
+        -------
         int
-            Number of samples in self.hrirs.
+            Number of samples in the HRIR time-domain representation.
+
+        Notes
+        -----
+        - Call this after resample() to get the updated length
+        - linear=True is useful to check original IR length before filtering
         """
         
         # returns the length of the HRTF impulse response
@@ -280,12 +376,40 @@ class HRTF:
     # sets hrirs to hrirs_linear
     def reset_hrirs(self):
         """
-        Restore the original unmodified HRIRs saved at initialization.
-        This resets self.hrirs to the copy stored in self.hrirs_linear.
+        Restore the original unmodified HRIRs.
+        
+        Resets self.hrirs to the copy stored in self.hrirs_linear, undoing
+        any headphone filter convolution or other modifications. Useful for
+        switching between filter presets.
+
+        Notes
+        -----
+        - Does not reset self.current_filter; call load_hp_filter(None) for that
+        - Original HRIRs are always preserved in self.hrirs_linear
         """
         self.hrirs = self.hrirs_linear.copy()
 
     def apply_dfe(self):
+        """
+        Apply Diffuse Field Equalization (DFE) to the HRIRs.
+        
+        Computes a minimum-phase DFE filter by averaging all HRIRs, inverting
+        the average response, and convolving the result with the original
+        unmodified HRIRs. This equalizes frequency-response variations across
+        directions.
+
+        Returns
+        -------
+        pf.Signal
+            The minimum-phase DFE filter applied to self.hrirs_linear.
+
+        Notes
+        -----
+        - Uses regularized spectrum inversion with frequency range [50 Hz, 16 kHz]
+        - Sets self.hrirs to the equalized result
+        - DFE is a standard preprocessing for improved binaural quality
+        - Computation may be slow for large HRTF datasets
+        """
         # averaging each HRTF with the average of all HRTF
         average = pf.dsp.average(self.hrirs_linear, mode='power',caxis=0)
         # Inversion
@@ -306,17 +430,19 @@ class Processing:
     
     def __init__(self):
         """
-        Create an HRTF preprocessing controller with available algorithms and defaults.
+        Initialize an HRTF preprocessing controller.
         
+        Sets up the available preprocessing algorithms (LS, MagLS, TA, BiMagLS)
+        and algorithm-specific gain factors for binaural rendering.
+
         Attributes
-        -------------
+        ----------
         algorithms : list
-            Supported algorithm names (e.g., 'LS', 'MagLS', ...).
+            Supported preprocessing algorithm names.
         current_algorithm : str
-            Name of the currently selected algorithm.
-            Default FFT bin count used internally.
-        __gain : dict
-            Algorithm-specific pre-gain factors.
+            Name of the currently active algorithm. Default is 'LS'.
+        _gain : dict
+            Algorithm-specific pre-gain multipliers (e.g., MagLS requires 1.28).
         """
 
         # the different algorithms available
@@ -386,18 +512,28 @@ class Processing:
     # solves the Least Squares Problem. This means just applying the spherical Harmonics to the HRTF
     def __ls(self, hrirs: pf.Signal, sh: spharpy.SphericalHarmonics):
         """
-        Compute spherical-harmonic coefficients via least-squares (direct matrix multiplication).
+        Compute spherical-harmonic coefficients via least-squares inversion.
+        
+        Applies the inverse spherical-harmonic basis matrix directly to the
+        HRIRs via matrix multiplication: h_nm = sh.basis_inv @ hrirs.
 
         Parameters
-        -----------
-        hrirs : pyfar.Signal
+        ----------
+        hrirs : pf.Signal
             Time-domain HRIR data.
         sh : spharpy.SphericalHarmonics
-            SH object containing the basis matrix.
+            Spherical-harmonic object containing the basis matrix.
 
         Returns
-        pyfar.Signal
-        Result of sh.basis_inv @ hrirs, transposed to the expected shape.
+        -------
+        pf.Signal
+            Spherical-harmonic coefficients with shape (n_directions, n_channels, n_samples).
+
+        Notes
+        -----
+        - Direct, fast approach; no iterative optimization
+        - Used for low SH orders or as fallback when MagLS fails
+        - Can produce phase artifacts at low orders; consider MagLS for perceptual quality
         """
 
         return (sh.basis_inv @ hrirs).T
