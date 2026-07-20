@@ -163,32 +163,3 @@ python examples\playback_demo.py test_ambix.wav --duration 10
 ```
 
 Each script has `--help` describing all options.
-
-## Head Tracking Status
-
-The current code does not implement full hardware head tracking. The GUI includes:
-
-- Manual yaw / pitch / roll scene rotation.
-- A simulated demo tracker that sweeps the yaw angle smoothly.
-- A synchronized head-direction visualizer.
-- A rotation-backend status display.
-
-If the rotation backend is available, the demo orientation can be passed into the spherical-harmonic rotation hook. If not, the GUI still shows the visualizer and reports that audio rotation is falling back to identity rotation.
-
-For full head tracking, the next implementation step should be:
-
-1. Add a tracker input module, for example OSC or PyHeadTracker.
-2. Store the latest yaw / pitch / roll values in a thread-safe orientation state.
-3. Update the rotation matrix at audio block boundaries.
-4. Add smoothing and latency checks.
-5. Add a GUI visualizer that displays the tracked head direction.
-
-## Demo Notes
-
-For a stable project presentation:
-
-- Use a short AmbiX test file with a clear sound direction.
-- Load the file through the GUI and demonstrate play, pause, seek, loop, and volume.
-- Show the live `Signal Information` panel to confirm order, channel count, duration, current time, HRTF, and headphone filter.
-- Present manual rotation and demo tracking as prototypes, not as completed hardware head tracking.
-- Use the head-direction visualizer to show how future tracker data would drive yaw / pitch / roll updates.
