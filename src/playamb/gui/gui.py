@@ -77,7 +77,7 @@ class AudioPlayerGUI:
         self.demo_tracker = DemoHeadTracker(self.orientation_state, 90)
         self.head_tracker = HeadTracker(self.orientation_state)
         self.osc_tracker = OSCHeadTracker(self.orientation_state)
-        self.osc_tracker.start() # start listening to OSC messages
+        self.osc_tracker.start_server() # start listening to OSC messages
         self.rotation_tracker = self.demo_tracker
         self.head_tracker_devices = []
         self.midi_error = ""
@@ -504,14 +504,6 @@ class AudioPlayerGUI:
         )
         self.roll_check.pack(side=tk.LEFT, padx=(0, 10))
 
-        #ttk.Label(card, textvariable=self.rotation_text, style="SmallInfo.TLabel").grid(
-        #    row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(16, 0)
-        #)
-
-        # ttk.Label(card, textvariable=self.rotation_backend_text, style="SmallInfo.TLabel").grid(
-        #     row=4, column=4, columnspan=2, sticky="e", pady=(16, 0)
-        # )
-
         ttk.Label(card, text="Tracking", background="white", font=("Arial", 10, "bold")).grid(
             row=5, column=0, sticky="w", pady=(10, 0)
         )
@@ -550,10 +542,6 @@ class AudioPlayerGUI:
         self.start_stop_tracking_button = ttk.Button(card, text="Start Tracking", state="disabled", command=self.start_stop_callback)
         self.start_stop_tracking_button.grid(row=5, column=6, sticky="w", padx=(0, 8), pady=(10, 0))
 
-        #self.stop_tracking_button = ttk.Button(card, text="Stop Tracking", command=self.stop_head_tracking)
-        #self.stop_tracking_button.grid(row=5, column=7, sticky="w", padx=(0, 8), pady=(10, 0))
-        #self.stop_tracking_button["state"] = "disabled"
-
         self.tracking_canvas = tk.Canvas(
             card,
             width=200,
@@ -568,11 +556,25 @@ class AudioPlayerGUI:
             row=6, column=0, columnspan=2, sticky="w", padx=(0, 0), pady=(10, 0)
         )
 
-        ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
-            row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(10, 0)
-        )
+        if False: # backbone for future implementation of manual OSC address input
+            ttk.Label(card, text="OSC address to be parsed:\n(Restart tracking to apply changes)", background="white", font=("Arial", 10)).grid(
+                row=6, column=2, sticky="w", pady=(10, 0)
+            )
 
-        self.tracking_mode_box.bind("<<ComboboxSelected>>", lambda sht: self.stop_head_tracking(True))
+            self.OSC_address_box = tk.Text(
+                card,
+                height=1,
+                width=3,
+                state="disabled",
+            )
+            self.OSC_address_box.insert(tk.END, '/yaw,pitch,roll')
+            self.OSC_address_box.grid(row=6, column=3, rowspan=2, columnspan=3, sticky="w", padx=(14, 12), pady=(10, 0))
+
+            ttk.Label(card, textvariable=self.tracking_angles, style="SmallInfo.TLabel").grid(
+                row=6, column=5, columnspan=2, sticky="e", padx=(0, 0), pady=(10, 0)
+            )
+
+        self.tracking_mode_box.bind("<<ComboboxSelected>>", self.tracking_mode_change_callback)
 
         # create visualizer instance form .obj file and draw the object
         self._visualizer = Visual3D("resources/virtualhead.obj", self.tracking_canvas, 
@@ -670,7 +672,7 @@ class AudioPlayerGUI:
 
     def start_stop_callback(self):
         if self.start_stop_tracking_button["text"]=="Start Tracking":
-            self.start_head_tracking()            
+            self.start_head_tracking()
         else:
             self.stop_head_tracking(True)
 
@@ -678,7 +680,10 @@ class AudioPlayerGUI:
         if self.tracking_mode.get() == "OSC":
             self.osc_tracker.zero()
         else:
-            self.head_tracker.zero()
+            self.start_head_tracking()
+
+    def tracking_mode_change_callback(self, *args):
+        self.stop_head_tracking(True)
 
     # ==============================================================
     # State helpers
@@ -748,7 +753,6 @@ class AudioPlayerGUI:
         """Apply current decoder settings."""
         if not self.has_loaded_player():
             return
-        # self.stop_head_tracking(reset_orientation=False)
         self.player.stop(reset_position=False)
         self.decoder_note.set("Applying decoder settings...")
         self.update_decoder_settings()
@@ -872,7 +876,6 @@ class AudioPlayerGUI:
             except Exception as e:
                 print(e)
                 pass
-        #self.stop_head_tracking(reset_orientation=False)
 
         file_name = os.path.basename(file_path)
         self.selected_file.set(f"AmbiX file selected: {file_name}")
@@ -1695,7 +1698,7 @@ class AudioPlayerGUI:
 
     def on_close(self):
         self.stop_head_tracking(reset_orientation=False)
-        self.osc_tracker.stop()
+        self.osc_tracker.stop_server()
         if self.has_player():
             try:
                 self.player.close()

@@ -147,6 +147,10 @@ class DemoHeadTracker:
         yaw = self.yaw_amplitude * math.sin(phase)
         pitch = self.pitch_amplitude * math.sin(phase * 0.5)
         return self.orientation_state.set(yaw, pitch, 0.0, source="demo")
+    
+    # zero function to match the API of the other trackers, does not do anything at all
+    def zero(self):
+        return
 
 class HeadTracker:
     """Adapter for physical head-tracking hardware using `pythonheadtracker`.
@@ -284,6 +288,7 @@ class OSCHeadTracker:
         self._server = None
         self._thread = None
         self._client = None
+        self._server_running = False
         self._running = False
         self._last_packet_time = None
 
@@ -298,27 +303,19 @@ class OSCHeadTracker:
             :bool:`False` otherwise.
         """
 
-        if False:
-            try:
-                self.start(parsemsg)
-            except Exception as error:
-                print(error)
-            rtn = self._receiving_packets
-            self.stop()
-            return rtn
         if self._last_packet_time is None:
             return False
-
+        # if more than half a second since the last packet was received, assume device disconnected/server un => OSC unavailable
         return time.monotonic() - self._last_packet_time < 0.5
 
-    # start
-    def start(self, parsemsg="/yaw,pitch,roll"):
+    # start listeing to OSC messages
+    def start_server(self, parsemsg="/yaw,pitch,roll"):
         """
-        Start an OSC threading server to receive orientation data from the tracker and set up a client to send zeroing messages.
+        Start an OSC threading server to receive orientation data from the tracker and set up a client to send a calibration trigger.
         Start a new thread to handle the incoming messages.
         """
 
-        if self._running:
+        if self._server_running:
             return
         self.zero()
         dispatcher = Dispatcher()
@@ -337,12 +334,35 @@ class OSCHeadTracker:
             self.write_host,
             self.write_port
         )
-        self._running = True
+        self._server_running = True
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             daemon=True
         )
         self._thread.start()
+
+    # shutdown
+    def stop_server(self):
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        self._server = None
+        self._running = False
+        self._server_running = False
+        self._thread = None
+
+    # start tracking: restart server to update parsing address, set running status True
+    def start(self, parsemsg="/yaw,pitch,roll"):
+        self.stop_server()
+        self.start_server(parsemsg)
+        if self._server_running:
+            self._running = True
+
+    # stop tracking = set running status to False
+    def stop(self):
+        self._running = False
 
     # receiving
     def _handle_orientation(self, address, yaw, pitch, roll):
@@ -352,13 +372,20 @@ class OSCHeadTracker:
         with a different hardware, since the angle data coming from the test hardware isn't natively
         in degrees.
         """
-        #self._running = True
-        self.orientation_state.set(
-            - OSCHeadTracker._osc2deg(yaw),
-            - OSCHeadTracker._osc2deg(pitch),
-            OSCHeadTracker._osc2deg(roll),
-            source="osc"
-        )
+        if self._running:
+            self.orientation_state.set(
+                - OSCHeadTracker._osc2deg(yaw),
+                - OSCHeadTracker._osc2deg(pitch),
+                OSCHeadTracker._osc2deg(roll),
+                source="osc"
+            )
+        self._last_packet_time = time.monotonic()
+    
+    def _unknown_packet(self, address: str, *osc_arguments: List[Any]) -> None:
+        """Default callback function for unrecognised OSC addresses. Print the address to stdout and set availability flag to false."""
+        if self._running:
+            self._running = False
+            raise LookupError(f"Could not parse OSC message. Unrecognised OSC address: {address}\n")
         self._last_packet_time = time.monotonic()
 
     # zeroing
@@ -366,25 +393,9 @@ class OSCHeadTracker:
         if self._client is not None:
             self._client.send_message("/zero", 1)
 
-    # shutdown
-    def stop(self):
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-        if self._thread is not None:
-            self._thread.join(timeout=1)
-        self._server = None
-        self._running = False
-        self._thread = None
-
     def is_running(self) -> bool:
-        """Return whether the OSC hardware tracking thread is active."""
+        """Return whether the OSC hardware tracking is running."""
         return self._running
-    
-    def _unknown_packet(self, address: str, *osc_arguments: List[Any]) -> None:
-        """Default callback function for unrecognised OSC addresses. Print the address to stdout and set availability flag to false."""
-        print(f"Unrecognised OSC address: {address}")
-        self._last_packet_time = time.monotonic()
 
     @staticmethod
     def _osc2deg(x: float):
