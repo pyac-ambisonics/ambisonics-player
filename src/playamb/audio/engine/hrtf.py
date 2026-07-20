@@ -59,7 +59,7 @@ class HRTF:
         self.hp_dir = self.resources / "Headphones"
         hp_subdir = [x for x in self.hp_dir.iterdir() if x.is_dir()] if self.hp_dir.exists() else []
         # check if this is the FABIAN HRTF Dataset. in that case we have headphone filters for it
-        if self.path.name == DEFAULT_HRTF_FILE:
+        if self.path.name == Path(DEFAULT_HRTF_FILE):
             self.hp_list = [x.name for x in hp_subdir]
         else:
             self.hp_list = []
@@ -258,6 +258,10 @@ class HRTF:
         # apply minimum phase conversion
         if min_phase:
             desired_length = n_samples - self.get_IR_length(linear=True)
+            if desired_length <= 0:
+                raise ValueError(
+                    "n_samples must be larger than the linear HRIR length for minimum-phase headphone filtering."
+                )
             # apply it before convolution to the hp_filter
             hp_filter = pf.dsp.minimum_phase(hp_filter)
 

@@ -4,9 +4,10 @@ and hardswapped to make the rotation faster and make realtime computation achiev
 """
 
 import numpy as np
-# import shroom.utils.rotation_utils as rot_utils
-from spharpy.transforms import wigner_d_function
 from pathlib import Path
+from scipy.spatial.transform import Rotation, Slerp
+
+from spharpy.transforms import wigner_d_function
 
 from playamb.utils.utils import resolve_path
 
@@ -238,3 +239,51 @@ class RotationMatrix:
 
         # save the file
         np.savez_compressed(file, allow_pickle=False, **results)
+
+    def interpolate_rotation_matrices(
+        self,
+        angles_old,
+        angles_new,
+        order,
+        n_steps: int = 16,
+        convention: str = "zyx",
+    ) -> np.ndarray:
+        """
+        Interpolate between two head orientations and return a stack of
+        real Wigner-D matrices for the intermediate rotations.
+
+        Parameters
+        ----------
+        angles_old : sequence of float
+            Previous Euler angles in degrees.
+        angles_new : sequence of float
+            Target Euler angles in degrees.
+        n_steps : int
+            Number of interpolation steps. Use this as a short fade length.
+        convention : str
+            Euler convention for the input angles.
+
+        Returns
+        -------
+        np.ndarray
+            Array with shape (n_steps, n_sh, n_sh).
+        """
+        if n_steps < 2:
+            raise ValueError("n_steps must be >= 2")
+
+        key_rots = Rotation.from_euler(
+            convention,
+            np.asarray([angles_old, angles_new], dtype=float),
+            degrees=True,
+        )
+        slerp = Slerp([0.0, 1.0], key_rots)
+        samples = slerp(np.linspace(0.0, 1.0, n_steps))
+
+        n_sh = (order + 1) ** 2
+        out = np.empty((n_steps, n_sh, n_sh), dtype=float)
+
+        for i, rot in enumerate(samples):
+            alpha, beta, gamma = rot.as_euler("zyz")
+            out[i] = self.real_wigner_d_matrix(order, alpha, beta, gamma)
+
+        return out
