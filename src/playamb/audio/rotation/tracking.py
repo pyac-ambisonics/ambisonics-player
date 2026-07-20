@@ -12,6 +12,9 @@ import threading
 import time
 import mido
 import pyheadtracker as pht
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.udp_client import SimpleUDPClient
+from pythonosc.osc_server import ThreadingOSCUDPServer
 from dataclasses import dataclass
 
 
@@ -166,7 +169,6 @@ class HeadTracker:
 
     def is_available(self):
         """Return True when matching MIDI input/output tracker devices are present."""
-
         return (any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_input_names()) 
             and any("Head Tracker" in MIDIdevice for MIDIdevice in mido.get_output_names())
         )
@@ -178,7 +180,8 @@ class HeadTracker:
         refresh_rate=25,
         chirality="preserve"
     ):
-        """Start hardware head tracking.
+        """
+        Start hardware head tracking.
 
         If device names are omitted, they are resolved automatically from the
         available MIDI input/output devices.
@@ -214,7 +217,6 @@ class HeadTracker:
 
     def _tracking_loop(self):
         """Read device orientation in a background thread and publish it."""
-
         while self._running:
             try:
                 orientation = pht.utils.rad2deg(self.ht.read_orientation())
@@ -236,7 +238,6 @@ class HeadTracker:
 
     def stop(self):
         """Stop the hardware tracker and close the device connection."""
-
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=1)
@@ -250,86 +251,99 @@ class HeadTracker:
 
     def zero(self):
         """Re-zero the device coordinate frame if the tracker supports it."""
-
         if self.ht is not None:
             self.ht.zero()
 
     def is_running(self):
         """Return whether the hardware tracking thread is active."""
-
         return self._running
 
-if False:
-    class OSCHeadTracker:
-        """
-        Provides headtracker support for hardware that supports sending data via OSC. Baseline for a potential future implementation
-        """
+class OSCHeadTracker:
+    """Provides headtracker support for hardware that supports sending data via OSC."""
 
-        def __init__(
-            self,
-            orientation_state,
-            listen_host="127.0.0.1",
-            listen_port=8000,
-            write_host="127.0.0.1",
-            write_port=9010,
-        ):
-            self.orientation_state = orientation_state
-            self.listen_host = listen_host
-            self.listen_port = listen_port
-            self.write_host = write_host
-            self.write_port = write_port
-            self._server = None
-            self._thread = None
-            self._client = None
-            self.connected = False
+    def __init__(
+        self,
+        orientation_state,
+        listen_host="127.0.0.1",
+        listen_port=8000,
+        write_host="127.0.0.1",
+        write_port=9010,
+    ):
+        self.orientation_state = orientation_state
+        self.listen_host = listen_host
+        self.listen_port = listen_port
+        self.write_host = write_host
+        self.write_port = write_port
+        self._server = None
+        self._thread = None
+        self._client = None
+        self._running = False
 
-        # start
-        def start(self):
-            dispatcher = Dispatcher()
-            dispatcher.map(
-                "/[yaw,pitch,roll]",
-                self._handle_orientation
-            )
-            dispatcher.set_default_handler(
-                self._unknown_packet
-            )
-            self._server = ThreadingOSCUDPServer(
-                (self.listen_host, self.listen_port),
-                dispatcher
-            )
-            self._client = SimpleUDPClient(
-                self.write_host,
-                self.write_port
-            )
-            self._thread = threading.Thread(
-                target=self._server.serve_forever,
-                daemon=True
-            )
-            self._thread.start()
+    def is_available(self):
+        """Return True when compatible OSC devices are connected."""
+        return True
 
-        # receiving
-        def _handle_orientation(self, address, *args):#yaw, pitch, roll instead of *args
-            print(address)
-            print(args)
-            """self.connected = True
-            self.orientation_state.set(
-                yaw,
-                pitch,
-                roll,
-                source="osc"
-            )"""
+    # start
+    def start(self):
+        if self._running:
+            return
+        self.zero()
+        dispatcher = Dispatcher()
+        dispatcher.map(
+            "/yaw,pitch,roll",
+            self._handle_orientation
+        )
+        dispatcher.set_default_handler(
+            self._unknown_packet
+        )
+        self._server = ThreadingOSCUDPServer(
+            (self.listen_host, self.listen_port),
+            dispatcher
+        )
+        self._client = SimpleUDPClient(
+            self.write_host,
+            self.write_port
+        )
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            daemon=True
+        )
+        self._thread.start()
 
-        # zeroing
-        def zero(self):
-            if self._client is not None:
-                self._client.send_message("/zero", 1)
+    # receiving
+    def _handle_orientation(self, address, yaw, pitch, roll):#yaw, pitch, roll instead of *args
+        self._running = True
+        self.orientation_state.set(
+            - OSCHeadTracker._osc2deg(yaw),
+            - OSCHeadTracker._osc2deg(pitch),
+            OSCHeadTracker._osc2deg(roll),
+            source="osc"
+        )
 
-        # shutdown
-        def stop(self):
-            if self._server is not None:
-                self._server.shutdown()
-                self._server.server_close()
-            if self._thread is not None:
-                self._thread.join(timeout=1)
-            self._server = None
-            self._thread = None
+    # zeroing
+    def zero(self):
+        if self._client is not None:
+            self._client.send_message("/zero", 1)
+
+    # shutdown
+    def stop(self):
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        self._server = None
+        self._running = False
+        self._thread = None
+
+    def is_running(self):
+        """Return whether the hardware tracking thread is active."""
+        return self._running
+    
+    def _unknown_packet(address: str, *osc_arguments: List[Any]) -> None:
+        print("Unrecognised OSC message")
+
+    @staticmethod
+    def _osc2deg(x: float):
+        return (x - 0.5) * 360

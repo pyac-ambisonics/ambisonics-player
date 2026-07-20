@@ -11,7 +11,7 @@ from dataclasses import replace
 
 from playamb.audio.data.ambifile import AmbisonicsFile
 from playamb.audio.engine.player import AudioPlayer
-from playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OrientationState
+from playamb.audio.rotation.tracking import HeadTracker, DemoHeadTracker, OSCHeadTracker, OrientationState
 from playamb.audio.engine.hrtf import HRTF
 from playamb.audio.engine.spherical import SphericalHarmonics
 from playamb.gui.visualizer import Visual3D
@@ -76,6 +76,7 @@ class AudioPlayerGUI:
         self.orientation_state = OrientationState()
         self.demo_tracker = DemoHeadTracker(self.orientation_state, 90)
         self.head_tracker = HeadTracker(self.orientation_state)
+        self.osc_tracker = OSCHeadTracker(self.orientation_state)
         self.rotation_tracker = self.demo_tracker
         self.head_tracker_devices = []
         self.midi_error = ""
@@ -542,7 +543,7 @@ class AudioPlayerGUI:
         )
         self.refresh_tracker_button.grid(row=5, column=4, sticky="w", padx=(0, 8), pady=(10, 0))
 
-        self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", state="disabled", command=self.head_tracker.zero)
+        self.zero_tracker_button = ttk.Button(card, text="Zero Tracker", state="disabled", command=self.zero_tracker_callback)
         self.zero_tracker_button.grid(row=5, column=5, sticky="w", padx=(0, 8), pady=(10, 0))
 
         self.start_stop_tracking_button = ttk.Button(card, text="Start Tracking", state="disabled", command=self.start_stop_callback)
@@ -599,6 +600,8 @@ class AudioPlayerGUI:
         modes = ["Off"]
         if self.head_tracker.is_available():
             modes.append("Hardware")
+        if self.osc_tracker.is_available():
+            modes.append("OSC")
         modes.append("Demo")
         return modes
 
@@ -669,6 +672,12 @@ class AudioPlayerGUI:
             self.start_head_tracking()            
         else:
             self.stop_head_tracking(True)
+
+    def zero_tracker_callback(self):
+        if self.tracking_mode.get() == "OSC":
+            self.osc_tracker.zero()
+        else:
+            self.head_tracker.zero()
 
     # ==============================================================
     # State helpers
@@ -1485,6 +1494,19 @@ class AudioPlayerGUI:
                     self.set_sliders_state(False)
                 except Exception as e:
                     print(f"Something went wrong: {e}")
+            case "OSC":
+                if "OSC" not in self.get_tracking_modes():
+                    self.tracking_status.set("Tracking: No OSC compatible hardware found")
+                    messagebox.showwarning(
+                        "Head Tracking",
+                        "No OSC compatible hardware is available. Use Demo tracking instead.",
+                    )
+                    return
+                try:
+                    self.rotation_tracker = self.osc_tracker
+                    self.set_sliders_state(False)
+                except Exception as e:
+                    print(f"Something went wrong: {e}")
             case "Off":
                 self.set_sliders_state(True)
                 return
@@ -1492,6 +1514,9 @@ class AudioPlayerGUI:
         try:
             if self.tracking_mode.get() == "Hardware":
                 self.rotation_tracker.start(chirality=self.chirality.get())
+                self.zero_tracker_button["state"] = "normal"
+            elif self.tracking_mode.get() == "OSC":
+                self.rotation_tracker.start()
                 self.zero_tracker_button["state"] = "normal"
             else:
                 self.rotation_tracker.start()
@@ -1523,9 +1548,10 @@ class AudioPlayerGUI:
             case "Hardware":
                 self.rotation_tracker = self.head_tracker
                 self.chirality_box["state"] = "readonly"
+            case "OSC":
+                self.rotation_tracker = self.osc_tracker
             case "Off":
                 self.start_stop_tracking_button.state(["disabled"])
-                print(self.tracking_mode.get())
 
         if reset_orientation:
             orientation = self.orientation_state.set(0.0, 0.0, 0.0, source="off")
