@@ -84,6 +84,7 @@ class HRTF:
         if fs != self.fs:
             self.hrirs = self._resample_save(self.hrirs, fs, truncate)
             self.hrirs_linear = self._resample_save(self.hrirs_linear, fs, truncate)
+            self.fs = fs
 
     def _resample_save(self, signal: pf.Signal, fs, truncate=True):
         """
