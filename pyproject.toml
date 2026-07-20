@@ -26,6 +26,7 @@ dependencies = [
     "pyshroom",
     "mido",
     "pyheadtracker",
+    "python-osc",
 ]
 
 [tool.setuptools.packages.find]
